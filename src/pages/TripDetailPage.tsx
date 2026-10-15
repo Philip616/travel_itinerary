@@ -1,15 +1,16 @@
 
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { 
   FullTripData, 
   SpotItem, 
   Flight, 
   Accommodation,
-  CategoryType
+  CategoryType,
+  TripMember
 } from '@/types/travel';
-import { fetchFullTrip, supabase, deleteTrip } from '@/lib/supabase';
+import { fetchFullTrip, supabase, deleteTrip, registerTripMember } from '@/lib/supabase';
 import { 
   getStoredNickname, 
   setStoredNickname, 
@@ -33,6 +34,7 @@ import {
   Building2, 
   MapPin, 
   User, 
+  Users,
   Trash2, 
   ShieldAlert, 
   WifiOff, 
@@ -98,6 +100,20 @@ function TripDetailInner({ slug }: { slug: string }) {
             setActiveSpotId(data.days[0].spots[0].id);
           }
         }
+        // 若本地已有暱稱，自動向房間登記成員
+        if (savedName) {
+          registerTripMember(data.trip.id, slug, savedName, getDeviceId()).then((res) => {
+            if (res.member) {
+              setFullData((prev) => {
+                if (!prev) return prev;
+                const filtered = prev.members.filter(
+                  (m) => m.id !== res.member?.id && m.nickname.toLowerCase() !== res.member?.nickname.toLowerCase()
+                );
+                return { ...prev, members: [...filtered, res.member!] };
+              });
+            }
+          });
+        }
       } else {
         setIsOfflineMode(true);
       }
@@ -110,6 +126,15 @@ function TripDetailInner({ slug }: { slug: string }) {
     if (supabase) {
       const channel = supabase
         .channel(`trip-realtime-${slug}`)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'trip_members' },
+          () => {
+            fetchFullTrip(slug).then((updated) => {
+              if (updated) setFullData(updated);
+            });
+          }
+        )
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'spot_items' },
@@ -763,11 +788,139 @@ function TripDetailInner({ slug }: { slug: string }) {
 
   const totalSpotsInTrip = fullData.days.reduce((acc, d) => acc + (d.spots?.length || 0), 0);
 
+  // 彙整房間所有協同成員與參與動態統計
+  const activeMembers = useMemo(() => {
+    if (!fullData) return [];
+    const map = new Map<string, {
+      member: TripMember;
+      isCurrent: boolean;
+      flightsCount: number;
+      spotsCount: number;
+      commentsCount: number;
+    }>();
+
+    const currentDeviceId = getDeviceId();
+    const normalizedCurrentName = currentMember.trim().toLowerCase();
+
+    // 1. 登記於 trip_members 中的成員
+    fullData.members.forEach((m) => {
+      if (!m.nickname) return;
+      const key = m.nickname.trim().toLowerCase();
+      map.set(key, {
+        member: m,
+        isCurrent: key === normalizedCurrentName || (!!m.device_id && m.device_id === currentDeviceId),
+        flightsCount: 0,
+        spotsCount: 0,
+        commentsCount: 0,
+      });
+    });
+
+    // 2. 當前使用者 (如果已設定暱稱但尚未在 members 中)
+    if (currentMember.trim()) {
+      const key = currentMember.trim().toLowerCase();
+      if (!map.has(key)) {
+        map.set(key, {
+          member: {
+            id: 'local_current',
+            trip_id: fullData.trip.id,
+            nickname: currentMember.trim(),
+            device_id: currentDeviceId,
+            created_at: new Date().toISOString()
+          },
+          isCurrent: true,
+          flightsCount: 0,
+          spotsCount: 0,
+          commentsCount: 0,
+        });
+      } else {
+        const item = map.get(key)!;
+        item.isCurrent = true;
+      }
+    }
+
+    // 3. 掃描航班統計與未知成員
+    fullData.flights.forEach((f) => {
+      if (!f.member_name) return;
+      const key = f.member_name.trim().toLowerCase();
+      if (!map.has(key)) {
+        map.set(key, {
+          member: {
+            id: `flight_${f.id}`,
+            trip_id: fullData.trip.id,
+            nickname: f.member_name.trim(),
+            device_id: '',
+            created_at: f.created_at || fullData.trip.created_at
+          },
+          isCurrent: key === normalizedCurrentName,
+          flightsCount: 1,
+          spotsCount: 0,
+          commentsCount: 0,
+        });
+      } else {
+        map.get(key)!.flightsCount += 1;
+      }
+    });
+
+    // 4. 掃描景點建立與留言統計
+    fullData.days.forEach((day) => {
+      day.spots.forEach((spot) => {
+        if (spot.created_by) {
+          const key = spot.created_by.trim().toLowerCase();
+          if (!map.has(key)) {
+            map.set(key, {
+              member: {
+                id: `spot_${spot.id}`,
+                trip_id: fullData.trip.id,
+                nickname: spot.created_by.trim(),
+                device_id: '',
+                created_at: spot.created_at || fullData.trip.created_at
+              },
+              isCurrent: key === normalizedCurrentName,
+              flightsCount: 0,
+              spotsCount: 1,
+              commentsCount: 0,
+            });
+          } else {
+            map.get(key)!.spotsCount += 1;
+          }
+        }
+
+        spot.comments?.forEach((c) => {
+          if (c.member_name) {
+            const key = c.member_name.trim().toLowerCase();
+            if (map.has(key)) {
+              map.get(key)!.commentsCount += 1;
+            }
+          }
+        });
+      });
+    });
+
+    // 住宿留言統計
+    fullData.accommodations.forEach((acc) => {
+      acc.comments?.forEach((c) => {
+        if (c.member_name) {
+          const key = c.member_name.trim().toLowerCase();
+          if (map.has(key)) {
+            map.get(key)!.commentsCount += 1;
+          }
+        }
+      });
+    });
+
+    // 排序：當前使用者置頂，其餘按加入或參與時間排序
+    return Array.from(map.values()).sort((a, b) => {
+      if (a.isCurrent && !b.isCurrent) return -1;
+      if (!a.isCurrent && b.isCurrent) return 1;
+      return new Date(a.member.created_at).getTime() - new Date(b.member.created_at).getTime();
+    });
+  }, [fullData, currentMember]);
+
   const navTabs: { id: TabType; label: string; icon: any; count?: number }[] = [
     { id: 'itinerary', label: '每日行程', icon: Calendar, count: totalSpotsInTrip },
     { id: 'flights', label: '航班對照', icon: Plane, count: fullData.flights.length },
     { id: 'accommodations', label: '住宿資訊', icon: Building2, count: fullData.accommodations.length },
-    { id: 'settings', label: '旅程設定', icon: Settings },
+    { id: 'settings', label: '旅程設定', icon: Settings, count: activeMembers.length },
   ];
 
   return (
@@ -1108,9 +1261,25 @@ function TripDetailInner({ slug }: { slug: string }) {
                     className="flex-1 px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:ring-2 focus:ring-blue-500 text-slate-900"
                   />
                   <button
-                    onClick={() => {
+                    onClick={async () => {
+                      if (!currentMember.trim()) {
+                        alert('請輸入有效暱稱');
+                        return;
+                      }
                       setStoredNickname(currentMember);
-                      alert('暱稱已成功更新！');
+                      if (fullData) {
+                        const res = await registerTripMember(fullData.trip.id, slug, currentMember, getDeviceId());
+                        if (res.member) {
+                          setFullData((prev) => {
+                            if (!prev) return prev;
+                            const filtered = prev.members.filter(
+                              (m) => m.id !== res.member?.id && m.nickname.toLowerCase() !== currentMember.toLowerCase()
+                            );
+                            return { ...prev, members: [...filtered, res.member!] };
+                          });
+                        }
+                      }
+                      alert('暱稱已成功更新並同步至房間成員！');
                     }}
                     className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black transition-all cursor-pointer shadow-xs"
                   >
@@ -1142,6 +1311,139 @@ function TripDetailInner({ slug }: { slug: string }) {
               </div>
             </div>
 
+            {/* 協同成員名單卡片 */}
+            <div className="bg-white rounded-3xl p-6 sm:p-7 border border-slate-200/90 shadow-sm space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
+                <div className="flex items-center gap-3">
+                  <span className="w-11 h-11 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold shadow-2xs">
+                    <Users className="w-5 h-5" />
+                  </span>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-black text-slate-900 tracking-tight">已加入協同編輯的成員</h3>
+                      <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200/60">
+                        共 {activeMembers.length} 人
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      開啟此房間連結並設定暱稱的好友，皆能即時在同一張行程表上編輯與同步
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/60">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    即時協同中
+                  </span>
+                  <button
+                    onClick={() => setShowShareModal(true)}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    <Share2 className="w-3.5 h-3.5" />
+                    <span>邀請好友</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* 成員清單網格 */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                {activeMembers.map((item, idx) => {
+                  const { member, isCurrent, flightsCount, spotsCount, commentsCount } = item;
+                  const initial = member.nickname ? member.nickname.trim().charAt(0).toUpperCase() : '?';
+
+                  const avatarGradients = [
+                    'from-blue-500 to-indigo-600',
+                    'from-violet-500 to-purple-600',
+                    'from-emerald-500 to-teal-600',
+                    'from-rose-500 to-pink-600',
+                    'from-amber-500 to-orange-600',
+                    'from-cyan-500 to-blue-600'
+                  ];
+                  const grad = avatarGradients[idx % avatarGradients.length];
+
+                  return (
+                    <div
+                      key={member.id || member.nickname}
+                      className={`p-4 rounded-2xl border transition-all flex flex-col justify-between ${
+                        isCurrent
+                          ? 'bg-blue-50/50 border-blue-200/80 shadow-xs'
+                          : 'bg-slate-50/60 hover:bg-slate-50 border-slate-200/70'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2 mb-3">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-11 h-11 rounded-2xl bg-gradient-to-br ${grad} text-white font-black text-base flex items-center justify-center shadow-xs flex-shrink-0`}>
+                            {initial}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-sm font-black text-slate-900 truncate">
+                                {member.nickname}
+                              </span>
+                              {isCurrent && (
+                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-blue-600 text-white shadow-2xs">
+                                  你 (目前裝置)
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-slate-400 font-medium mt-0.5">
+                              {member.created_at
+                                ? `加入於 ${new Date(member.created_at).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
+                                : '已在此旅程'}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 成員在旅程中的參與動態標籤 */}
+                      <div className="flex items-center gap-1.5 flex-wrap pt-2 border-t border-slate-200/50 text-[10px] text-slate-600">
+                        {flightsCount > 0 ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-sky-100/70 text-sky-800 rounded-lg font-bold">
+                            <Plane className="w-2.5 h-2.5" />
+                            已登記 {flightsCount} 趟航班
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-200/60 text-slate-500 rounded-lg font-medium">
+                            航班尚未填寫
+                          </span>
+                        )}
+
+                        {spotsCount > 0 && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-100/70 text-amber-800 rounded-lg font-bold">
+                            <MapPin className="w-2.5 h-2.5" />
+                            排了 {spotsCount} 個景點
+                          </span>
+                        )}
+
+                        {commentsCount > 0 && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-indigo-100/70 text-indigo-800 rounded-lg font-bold">
+                            留言 {commentsCount} 次
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* 只有一位成員時的邀請提示 */}
+              {activeMembers.length <= 1 && (
+                <div className="p-4 rounded-2xl bg-amber-50/70 border border-amber-200/70 flex items-center justify-between gap-3 flex-wrap">
+                  <div className="flex items-center gap-2.5 text-xs text-amber-900 font-medium">
+                    <Sparkles className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                    <span>目前房間只有你一人。複製房間連結傳到 LINE 群組，好友點開輸入暱稱後就會即時在此出現！</span>
+                  </div>
+                  <button
+                    onClick={() => setShowShareModal(true)}
+                    className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer flex-shrink-0"
+                  >
+                    複製邀請網址
+                  </button>
+                </div>
+              )}
+            </div>
+
             {/* 主辦人防呆危險區塊 */}
             <div className="bg-white rounded-3xl p-6 border border-rose-200/90 shadow-sm">
               <h3 className="text-base font-black text-rose-700 flex items-center gap-2 mb-1.5">
@@ -1164,7 +1466,11 @@ function TripDetailInner({ slug }: { slug: string }) {
       )}
 
       {/* 行動端底部固定導航列 (桌面版自動隱藏) */}
-      <BottomNav currentTab={currentTab} onSelectTab={(tab) => setCurrentTab(tab)} />
+      <BottomNav
+        currentTab={currentTab}
+        onSelectTab={(tab) => setCurrentTab(tab)}
+        membersCount={activeMembers.length}
+      />
 
       {/* 行動端浮動新增按鈕 (桌面版自動隱藏) */}
       {currentTab === 'itinerary' && (
@@ -1184,9 +1490,21 @@ function TripDetailInner({ slug }: { slug: string }) {
       <NicknameModal
         isOpen={showNicknameModal}
         initialNickname={currentMember}
-        onSave={(name) => {
+        onSave={async (name) => {
           setCurrentMember(name);
           setShowNicknameModal(false);
+          if (fullData) {
+            const res = await registerTripMember(fullData.trip.id, slug, name, getDeviceId());
+            if (res.member) {
+              setFullData((prev) => {
+                if (!prev) return prev;
+                const filtered = prev.members.filter(
+                  (m) => m.id !== res.member?.id && m.nickname.toLowerCase() !== name.toLowerCase()
+                );
+                return { ...prev, members: [...filtered, res.member!] };
+              });
+            }
+          }
         }}
         onClose={() => setShowNicknameModal(false)}
       />

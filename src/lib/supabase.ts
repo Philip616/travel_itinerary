@@ -243,3 +243,88 @@ export async function deleteTrip(slug: string, tripId: string): Promise<{ succes
   return { success: true, error: null };
 }
 
+// 登記或更新成員至旅程房間 (支援離線快取與雲端同步)
+export async function registerTripMember(
+  tripId: string,
+  slug: string,
+  nickname: string,
+  deviceId: string
+): Promise<{ member: TripMember | null; error: string | null }> {
+  const cleanName = nickname.trim();
+  if (!cleanName) return { member: null, error: '暱稱不可為空' };
+
+  const now = new Date().toISOString();
+  let resultMember: TripMember = {
+    id: `mem_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    trip_id: tripId,
+    nickname: cleanName,
+    device_id: deviceId,
+    created_at: now
+  };
+
+  // 1. 本地離線快取更新
+  const localCache = getLocalTripCache(slug);
+  if (localCache) {
+    if (!localCache.members) localCache.members = [];
+    const existingIndex = localCache.members.findIndex(
+      (m) => (m.device_id && m.device_id === deviceId) || m.nickname.toLowerCase() === cleanName.toLowerCase()
+    );
+    if (existingIndex >= 0) {
+      localCache.members[existingIndex] = {
+        ...localCache.members[existingIndex],
+        nickname: cleanName
+      };
+      resultMember = localCache.members[existingIndex];
+    } else {
+      localCache.members.push(resultMember);
+    }
+    setLocalTripCache(slug, localCache);
+  }
+
+  // 2. 若配置 Supabase 則同步至雲端
+  if (supabase) {
+    try {
+      const { data: existingList, error: queryErr } = await supabase
+        .from('trip_members')
+        .select('*')
+        .eq('trip_id', tripId);
+
+      if (queryErr) throw queryErr;
+
+      const existing = existingList?.find(
+        (m: TripMember) => (m.device_id && m.device_id === deviceId) || m.nickname.toLowerCase() === cleanName.toLowerCase()
+      );
+
+      if (existing) {
+        const { data: updated, error: updateErr } = await supabase
+          .from('trip_members')
+          .update({ nickname: cleanName })
+          .eq('id', existing.id)
+          .select()
+          .single();
+
+        if (updateErr) throw updateErr;
+        return { member: updated, error: null };
+      } else {
+        const { data: inserted, error: insertErr } = await supabase
+          .from('trip_members')
+          .insert([{
+            trip_id: tripId,
+            nickname: cleanName,
+            device_id: deviceId
+          }])
+          .select()
+          .single();
+
+        if (insertErr) throw insertErr;
+        return { member: inserted, error: null };
+      }
+    } catch (err: any) {
+      console.warn('同步成員至雲端失敗，以本地快取優先:', err?.message || err);
+    }
+  }
+
+  return { member: resultMember, error: null };
+}
+
+
