@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { createNewTrip, isSupabaseConfigured } from '@/lib/supabase';
+import { createNewTrip, isSupabaseConfigured, validateExistingSlugs } from '@/lib/supabase';
+import { pruneInvalidTripCaches } from '@/lib/storage';
 import { 
   Plus, 
   ArrowRight, 
@@ -43,7 +44,7 @@ export default function HomePage() {
     setStartDate(defaultStart.toISOString().split('T')[0]);
     setEndDate(defaultEnd.toISOString().split('T')[0]);
 
-    // 讀取最近開啟過的旅程
+    // 1. 立即讀取本機已快取的旅程清單呈現
     try {
       const keys = Object.keys(localStorage).filter((k) => k.startsWith('travel_trip_cache_'));
       const list = keys.map((k) => {
@@ -55,6 +56,18 @@ export default function HomePage() {
         };
       }).filter((t) => t.slug);
       setRecentTrips(list);
+
+      // 2. 若有雲端資料庫且處於在線狀態，背景自動校驗旅程是否存在，修剪線上已刪除的殭屍快取
+      if (isSupabaseConfigured && list.length > 0 && typeof navigator !== 'undefined' && navigator.onLine) {
+        const cachedSlugs = list.map((t) => t.slug);
+        validateExistingSlugs(cachedSlugs).then((validSlugs) => {
+          if (validSlugs.length < cachedSlugs.length) {
+            pruneInvalidTripCaches(validSlugs);
+            const validSet = new Set(validSlugs);
+            setRecentTrips((prev) => prev.filter((t) => validSet.has(t.slug)));
+          }
+        });
+      }
     } catch (e) {
       // ignore
     }

@@ -22,6 +22,8 @@ export function DaySelector({ days, selectedDayId, onSelectDay }: DaySelectorPro
           {days.map((day) => {
             const isSelected = day.id === selectedDayId;
             const displayDate = day.date ? day.date.slice(5).replace('-', '/') : '';
+            const customTheme = day.theme && day.theme !== `第 ${day.day_number} 天行程` ? day.theme : '';
+
             return (
               <button
                 key={day.id}
@@ -35,11 +37,21 @@ export function DaySelector({ days, selectedDayId, onSelectDay }: DaySelectorPro
                 <span className="text-xs font-black uppercase tracking-wider">
                   Day {day.day_number}
                 </span>
+
+                {customTheme && (
+                  <span className={`text-[11px] font-bold max-w-[100px] sm:max-w-[140px] truncate ${
+                    isSelected ? 'text-blue-100' : 'text-slate-700'
+                  }`}>
+                    {customTheme}
+                  </span>
+                )}
+
                 {displayDate && (
                   <span className={`text-[11px] font-medium ${isSelected ? 'text-blue-100' : 'text-slate-400'}`}>
                     {displayDate}
                   </span>
                 )}
+
                 {day.spots && day.spots.length > 0 && (
                   <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
                     isSelected ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-600'
