@@ -31,14 +31,14 @@ export function NicknameModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-      <div className="w-full max-w-sm bg-white rounded-3xl p-6 shadow-2xl text-center">
-        <div className="w-14 h-14 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
-          <User className="w-7 h-7" />
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-4 animate-in fade-in duration-200">
+      <div className="w-full max-w-sm bg-white rounded-3xl p-6 sm:p-7 shadow-2xl text-center animate-in zoom-in-95 duration-200 border border-slate-100">
+        <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-indigo-600 text-white rounded-3xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-blue-500/25">
+          <User className="w-8 h-8" />
         </div>
-        <h3 className="text-lg font-bold text-slate-800">歡迎加入旅程！</h3>
-        <p className="text-xs text-slate-500 mt-1 mb-5">
-          請輸入你的暱稱，方便旅伴知道是誰推薦景點、按讚與登記機票
+        <h3 className="text-xl font-black text-slate-900 tracking-tight">歡迎加入旅程房間！</h3>
+        <p className="text-xs text-slate-500 mt-1.5 mb-6 leading-relaxed">
+          輸入你的名字或暱稱，旅伴就能在景點推薦、票選與機票清單上認出你
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -49,25 +49,25 @@ export function NicknameModal({
             placeholder="例如：小明、Alice、阿瑋"
             value={nickname}
             onChange={(e) => setNickname(e.target.value)}
-            className="w-full text-center px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-base font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full text-center px-4 py-3.5 bg-slate-50 border border-slate-200/90 rounded-2xl text-base font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
 
-          <div className="flex gap-2 pt-2">
+          <div className="flex gap-2.5 pt-2">
             {!isMandatory && onClose && (
               <button
                 type="button"
                 onClick={onClose}
-                className="flex-1 py-3 border border-slate-200 rounded-xl font-bold text-slate-600 text-xs"
+                className="flex-1 py-3 border border-slate-200 rounded-2xl font-bold text-slate-600 text-xs hover:bg-slate-50 transition-colors cursor-pointer"
               >
-                稍後再說
+                稍後設定
               </button>
             )}
             <button
               type="submit"
-              className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs shadow-md shadow-blue-200 active:scale-95 transition-all flex items-center justify-center gap-1.5"
+              className="flex-1 py-3.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold rounded-2xl text-xs shadow-md shadow-blue-500/25 active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer"
             >
-              <Sparkles className="w-3.5 h-3.5" />
-              開始協同規劃
+              <Sparkles className="w-4 h-4 text-amber-300" />
+              <span>進入協同規劃</span>
             </button>
           </div>
         </form>

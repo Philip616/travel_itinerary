@@ -19,7 +19,7 @@ export function BottomNav({ currentTab, onSelectTab }: BottomNavProps) {
   ];
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 shadow-lg safe-area-bottom">
+    <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 shadow-lg safe-area-bottom">
       <div className="max-w-md mx-auto flex items-center justify-around h-16 px-2">
         {tabs.map((tab) => {
           const Icon = tab.icon;

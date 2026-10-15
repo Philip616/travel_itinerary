@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { CategoryType, SpotItem } from '@/types/travel';
-import { X, Plus, MapPin } from 'lucide-react';
+import { X, Plus, MapPin, Camera, Utensils, ShoppingBag, Bus, Sparkles, DollarSign, Clock } from 'lucide-react';
 import { getGoogleMapsSearchUrl } from '@/lib/maps';
 
 interface AddSpotModalProps {
@@ -42,7 +42,7 @@ export function AddSpotModal({
       address: address.trim() || undefined,
       google_map_url: mapsUrl,
       cost_estimate: costEstimate.trim() || undefined,
-      created_by: currentMember || '匿名成員',
+      created_by: currentMember || '匿名旅伴',
       votes: [],
       comments: []
     });
@@ -54,114 +54,143 @@ export function AddSpotModal({
     onClose();
   };
 
-  const categories: { key: CategoryType; label: string }[] = [
-    { key: 'ATTRACTION', label: '景點' },
-    { key: 'FOOD', label: '美食' },
-    { key: 'SHOPPING', label: '購物' },
-    { key: 'TRANSPORT', label: '交通' },
-    { key: 'OTHER', label: '其他' },
+  const categories: { key: CategoryType; label: string; icon: any; color: string }[] = [
+    { key: 'ATTRACTION', label: '熱門景點', icon: Camera, color: 'hover:bg-emerald-50 hover:text-emerald-700' },
+    { key: 'FOOD', label: '美食餐廳', icon: Utensils, color: 'hover:bg-amber-50 hover:text-amber-700' },
+    { key: 'SHOPPING', label: '購物採買', icon: ShoppingBag, color: 'hover:bg-pink-50 hover:text-pink-700' },
+    { key: 'TRANSPORT', label: '交通移動', icon: Bus, color: 'hover:bg-indigo-50 hover:text-indigo-700' },
+    { key: 'OTHER', label: '其他備註', icon: Sparkles, color: 'hover:bg-slate-50 hover:text-slate-700' },
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-xs p-0 sm:p-4">
-      <div className="w-full max-w-md bg-white rounded-t-3xl sm:rounded-2xl p-5 shadow-2xl animate-in slide-in-from-bottom duration-200">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-            <Plus className="w-5 h-5 text-blue-600" />
-            新增行程景點
-          </h3>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-4 animate-in fade-in duration-200">
+      <div className="w-full max-w-md bg-white rounded-3xl p-6 shadow-2xl animate-in zoom-in-95 duration-200 max-h-[92vh] overflow-y-auto">
+        <div className="flex justify-between items-center mb-5">
+          <div className="flex items-center gap-2.5">
+            <span className="w-9 h-9 rounded-2xl bg-blue-100 text-blue-600 flex items-center justify-center font-bold">
+              <Plus className="w-5 h-5 stroke-[2.5]" />
+            </span>
+            <div>
+              <h3 className="text-lg font-black text-slate-900 tracking-tight">新增行程地點</h3>
+              <p className="text-[11px] text-slate-400">安排當日動線、時段與預估預算</p>
+            </div>
+          </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100"
+            className="p-2 text-slate-400 hover:text-slate-700 rounded-full hover:bg-slate-100 transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4 text-xs">
           {/* 景點名稱 */}
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">
-              景點／地點名稱 <span className="text-rose-500">*</span>
+            <label className="block font-bold text-slate-700 mb-1.5">
+              地點名稱 <span className="text-rose-500">*</span>
             </label>
             <input
               type="text"
               required
-              placeholder="例如：SHIBUYA SKY、一蘭拉麵"
+              placeholder="例如：SHIBUYA SKY、一蘭拉麵、淺草寺"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full p-3 bg-slate-50 border border-slate-200/90 rounded-2xl text-slate-900 font-medium focus:ring-2 focus:ring-blue-500"
             />
           </div>
 
-          {/* 類別選擇 */}
+          {/* 類別選擇晶片 */}
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">類別</label>
-            <div className="flex gap-2">
-              {categories.map((c) => (
-                <button
-                  type="button"
-                  key={c.key}
-                  onClick={() => setCategory(c.key)}
-                  className={`flex-1 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                    category === c.key
-                      ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                  }`}
-                >
-                  {c.label}
-                </button>
-              ))}
+            <label className="block font-bold text-slate-700 mb-1.5">地點類別</label>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {categories.map((cat) => {
+                const Icon = cat.icon;
+                const isSelected = category === cat.key;
+                return (
+                  <button
+                    key={cat.key}
+                    type="button"
+                    onClick={() => setCategory(cat.key)}
+                    className={`flex items-center gap-1.5 px-3 py-2.5 rounded-xl font-bold border transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                        : `bg-slate-50 text-slate-700 border-slate-200/80 ${cat.color}`
+                    }`}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                    <span>{cat.label}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
-          {/* 時段與費用預估 */}
-          <div className="grid grid-cols-2 gap-3">
+          {/* 時段與預估費用 */}
+          <div className="grid grid-cols-2 gap-2.5">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">預估時段</label>
-              <input
-                type="text"
-                placeholder="例如：10:00 - 12:00"
-                value={timeSlot}
-                onChange={(e) => setTimeSlot(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+              <label className="block font-bold text-slate-700 mb-1">
+                預計時段 <span className="text-slate-400 font-normal">(選填)</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  placeholder="如 14:00 - 16:30"
+                  value={timeSlot}
+                  onChange={(e) => setTimeSlot(e.target.value)}
+                  className="w-full p-3 bg-slate-50 border border-slate-200/90 rounded-2xl text-slate-900 font-medium pl-8"
+                />
+                <Clock className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-3.5" />
+              </div>
             </div>
+
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">費用預估 (選填)</label>
-              <input
-                type="text"
-                placeholder="例如：¥2,500 或 $500"
-                value={costEstimate}
-                onChange={(e) => setCostEstimate(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+              <label className="block font-bold text-slate-700 mb-1">
+                預估花費 <span className="text-slate-400 font-normal">(選填)</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  placeholder="如 2,500 日圓"
+                  value={costEstimate}
+                  onChange={(e) => setCostEstimate(e.target.value)}
+                  className="w-full p-3 bg-slate-50 border border-slate-200/90 rounded-2xl text-slate-900 font-medium pl-8"
+                />
+                <DollarSign className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-3.5" />
+              </div>
             </div>
           </div>
 
           {/* 地址 */}
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">
-              地址或大地標 (自動產生導航)
+            <label className="block font-bold text-slate-700 mb-1">
+              地址或大地標 <span className="text-slate-400 font-normal">(供地圖精確定位)</span>
             </label>
             <div className="relative">
               <input
                 type="text"
-                placeholder="例如：東京都澀谷區2-24-12"
+                placeholder="例如：東京都渋谷区渋谷2丁目24-12"
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full p-3 bg-slate-50 border border-slate-200/90 rounded-2xl text-slate-900 font-medium pl-8"
               />
-              <MapPin className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+              <MapPin className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-3.5" />
             </div>
           </div>
 
-          <div className="pt-2">
+          {/* 動作按鈕 */}
+          <div className="flex gap-2.5 pt-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 py-3 border border-slate-200 rounded-2xl font-bold text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer"
+            >
+              取消
+            </button>
             <button
               type="submit"
-              className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md shadow-blue-200 active:scale-[0.98] transition-all"
+              className="flex-1 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-2xl font-bold shadow-md shadow-blue-500/25 transition-all cursor-pointer"
             >
-              加入當日行程
+              加入本日行程
             </button>
           </div>
         </form>

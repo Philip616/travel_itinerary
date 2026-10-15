@@ -6,7 +6,8 @@ import {
   FullTripData, 
   SpotItem, 
   Flight, 
-  Accommodation 
+  Accommodation,
+  CategoryType
 } from '@/types/travel';
 import { fetchFullTrip, supabase } from '@/lib/supabase';
 import { 
@@ -19,6 +20,7 @@ import { getGoogleMapsSearchUrl } from '@/lib/maps';
 import { BottomNav, TabType } from '@/components/BottomNav';
 import { DaySelector } from '@/components/DaySelector';
 import { SpotCard } from '@/components/SpotCard';
+import { MapViewer } from '@/components/MapViewer';
 import { AddSpotModal } from '@/components/AddSpotModal';
 import { FlightSection } from '@/components/FlightSection';
 import { AccommodationSection } from '@/components/AccommodationSection';
@@ -35,7 +37,18 @@ import {
   ShieldAlert, 
   WifiOff, 
   Calendar,
-  Sparkles 
+  Sparkles,
+  Plane,
+  Settings,
+  ExternalLink,
+  ChevronRight,
+  ArrowLeft,
+  Filter,
+  Camera,
+  Utensils,
+  ShoppingBag,
+  Bus,
+  Layers
 } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
@@ -49,9 +62,9 @@ export default function TripDetailPage({ params }: PageProps) {
     <React.Suspense
       fallback={
         <div className="min-h-screen flex items-center justify-center bg-slate-50">
-          <div className="flex flex-col items-center gap-2">
-            <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin" />
-            <p className="text-xs text-slate-500 font-medium">載入行程中...</p>
+          <div className="flex flex-col items-center gap-3">
+            <div className="w-10 h-10 border-3 border-blue-600 border-t-transparent rounded-full animate-spin" />
+            <p className="text-xs text-slate-500 font-semibold tracking-wider">載入行程中...</p>
           </div>
         </div>
       }
@@ -70,8 +83,10 @@ function TripDetailInner({ params }: PageProps) {
   const [loading, setLoading] = useState(true);
   const [currentTab, setCurrentTab] = useState<TabType>('itinerary');
   const [selectedDayId, setSelectedDayId] = useState<string>('');
+  const [activeSpotId, setActiveSpotId] = useState<string>('');
   const [currentMember, setCurrentMember] = useState<string>('');
   const [isOfflineMode, setIsOfflineMode] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
 
   // 彈窗狀態
   const [showNicknameModal, setShowNicknameModal] = useState(false);
@@ -96,6 +111,9 @@ function TripDetailInner({ params }: PageProps) {
         setFullData(data);
         if (data.days.length > 0) {
           setSelectedDayId(data.days[0].id);
+          if (data.days[0].spots.length > 0) {
+            setActiveSpotId(data.days[0].spots[0].id);
+          }
         }
       } else {
         setIsOfflineMode(true);
@@ -105,72 +123,100 @@ function TripDetailInner({ params }: PageProps) {
 
     loadData();
 
-    // 監聽網路連線狀態
-    const handleOnline = () => setIsOfflineMode(false);
-    const handleOffline = () => setIsOfflineMode(true);
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
+    // 即時協同訂閱
+    if (supabase) {
+      const channel = supabase
+        .channel(`trip-realtime-${slug}`)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'spot_items' },
+          () => {
+            fetchFullTrip(slug).then((updated) => {
+              if (updated) setFullData(updated);
+            });
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'flights' },
+          () => {
+            fetchFullTrip(slug).then((updated) => {
+              if (updated) setFullData(updated);
+            });
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'accommodations' },
+          () => {
+            fetchFullTrip(slug).then((updated) => {
+              if (updated) setFullData(updated);
+            });
+          }
+        )
+        .subscribe();
 
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
+      return () => {
+        if (supabase) {
+          supabase.removeChannel(channel);
+        }
+      };
+    }
   }, [slug]);
 
-  // 更新完整資料與本地快取
+  // 更新快取並同步 state
   const updateData = (newData: FullTripData) => {
     setFullData(newData);
     setLocalTripCache(slug, newData);
   };
 
-  // 1. 投票切換處理
+  // 1. 景點投票
   const handleVote = async (spotId: string) => {
     if (!fullData) return;
-    const member = currentMember || '匿名成員';
+    const deviceId = getDeviceId();
+    const voter = currentMember || '旅伴';
 
     const newDays = fullData.days.map((day) => {
       const newSpots = day.spots.map((spot) => {
         if (spot.id !== spotId) return spot;
-
-        const currentVotes = spot.votes || [];
-        const existingVoteIndex = currentVotes.findIndex((v) => v.member_name === member);
-        let updatedVotes = [...currentVotes];
+        const existingVoteIndex = spot.votes?.findIndex((v) => v.member_name === voter) ?? -1;
+        let newVotes = spot.votes ? [...spot.votes] : [];
 
         if (existingVoteIndex >= 0) {
-          // 取消投票
-          updatedVotes.splice(existingVoteIndex, 1);
+          newVotes.splice(existingVoteIndex, 1);
         } else {
-          // 新增按讚
-          updatedVotes.push({
-            id: 'vote_' + Math.random().toString(36).substring(2, 9),
+          newVotes.push({
+            id: 'temp_' + Math.random(),
             spot_id: spotId,
-            member_name: member,
+            member_name: voter,
             vote_type: 'UP',
             created_at: new Date().toISOString(),
           });
         }
-
-        return { ...spot, votes: updatedVotes };
+        return { ...spot, votes: newVotes };
       });
       return { ...day, spots: newSpots };
     });
 
-    const updatedTripData = { ...fullData, days: newDays };
-    updateData(updatedTripData);
+    updateData({ ...fullData, days: newDays });
 
     if (supabase) {
       try {
-        const { data: existing } = await supabase
+        const { data: currentVotes } = await supabase
           .from('spot_votes')
           .select('id')
           .eq('spot_id', spotId)
-          .eq('member_name', member)
-          .maybeSingle();
+          .eq('member_name', voter);
 
-        if (existing) {
-          await supabase.from('spot_votes').delete().eq('id', existing.id);
+        if (currentVotes && currentVotes.length > 0) {
+          await supabase.from('spot_votes').delete().eq('id', currentVotes[0].id);
         } else {
-          await supabase.from('spot_votes').insert([{ spot_id: spotId, member_name: member, vote_type: 'UP' }]);
+          await supabase.from('spot_votes').insert([{
+            spot_id: spotId,
+            member_name: voter,
+            device_id: deviceId,
+            vote_type: 'UP',
+          }]);
         }
       } catch (err) {
         console.warn('雲端投票同步失敗:', err);
@@ -178,15 +224,15 @@ function TripDetailInner({ params }: PageProps) {
     }
   };
 
-  // 2. 留言處理
+  // 2. 新增留言
   const handleAddComment = async (spotId: string, content: string) => {
     if (!fullData || !content.trim()) return;
-    const member = currentMember || '匿名成員';
+    const author = currentMember || '旅伴';
 
-    const newComment = {
-      id: 'cmt_' + Math.random().toString(36).substring(2, 9),
+    const newCommentObj = {
+      id: 'c_' + Math.random().toString(36).substring(2, 9),
       spot_id: spotId,
-      member_name: member,
+      member_name: author,
       content: content.trim(),
       created_at: new Date().toISOString(),
     };
@@ -196,7 +242,7 @@ function TripDetailInner({ params }: PageProps) {
         if (spot.id !== spotId) return spot;
         return {
           ...spot,
-          comments: [...(spot.comments || []), newComment],
+          comments: [...(spot.comments || []), newCommentObj],
         };
       });
       return { ...day, spots: newSpots };
@@ -206,30 +252,33 @@ function TripDetailInner({ params }: PageProps) {
 
     if (supabase) {
       try {
-        await supabase.from('spot_comments').insert([
-          { spot_id: spotId, member_name: member, content: content.trim() },
-        ]);
+        await supabase.from('spot_comments').insert([{
+          spot_id: spotId,
+          member_name: author,
+          content: content.trim(),
+        }]);
       } catch (err) {
-        console.warn('雲端留言同步失敗:', err);
+        console.warn('雲端留言新增失敗:', err);
       }
     }
   };
 
-  // 3. 新增景點處理
+  // 3. 新增景點
   const handleAddSpot = async (spotData: Partial<SpotItem>) => {
     if (!fullData || !selectedDayId) return;
 
+    const currentDaySpots = fullData.days.find((d) => d.id === selectedDayId)?.spots || [];
     const newSpot: SpotItem = {
-      id: 'spot_' + Math.random().toString(36).substring(2, 10),
+      id: 'sp_' + Math.random().toString(36).substring(2, 9),
       day_id: selectedDayId,
-      title: spotData.title || '',
+      title: spotData.title || '新景點',
       category: spotData.category || 'ATTRACTION',
       time_slot: spotData.time_slot,
       address: spotData.address,
       google_map_url: spotData.google_map_url,
       cost_estimate: spotData.cost_estimate,
-      sort_order: 0,
-      created_by: currentMember || '匿名成員',
+      sort_order: currentDaySpots.length,
+      created_by: currentMember || '旅伴',
       created_at: new Date().toISOString(),
       votes: [],
       comments: [],
@@ -244,6 +293,7 @@ function TripDetailInner({ params }: PageProps) {
     });
 
     updateData({ ...fullData, days: newDays });
+    setActiveSpotId(newSpot.id);
 
     if (supabase) {
       try {
@@ -272,6 +322,9 @@ function TripDetailInner({ params }: PageProps) {
     }));
 
     updateData({ ...fullData, days: newDays });
+    if (activeSpotId === spotId) {
+      setActiveSpotId('');
+    }
 
     if (supabase) {
       try {
@@ -414,9 +467,9 @@ function TripDetailInner({ params }: PageProps) {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <div className="flex flex-col items-center gap-2">
-          <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin" />
-          <p className="text-xs text-slate-500 font-medium">載入行程中...</p>
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-10 h-10 border-3 border-blue-600 border-t-transparent rounded-full animate-spin" />
+          <p className="text-xs text-slate-500 font-semibold tracking-wider">載入行程中...</p>
         </div>
       </div>
     );
@@ -425,11 +478,11 @@ function TripDetailInner({ params }: PageProps) {
   if (!fullData) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center">
-        <h2 className="text-xl font-bold text-slate-800 mb-2">找不到此旅程</h2>
-        <p className="text-xs text-slate-500 mb-6">請確認分享連結代碼是否正確</p>
+        <h2 className="text-xl font-black text-slate-900 mb-2">找不到此旅程房間</h2>
+        <p className="text-xs text-slate-500 mb-6">請確認分享連結代碼是否正確，或此旅程已結束</p>
         <button
           onClick={() => router.push('/')}
-          className="px-5 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold"
+          className="px-6 py-3 bg-blue-600 text-white rounded-2xl text-xs font-bold shadow-md hover:bg-blue-700 transition-all cursor-pointer"
         >
           返回首頁
         </button>
@@ -439,7 +492,12 @@ function TripDetailInner({ params }: PageProps) {
 
   // 取得當前選取的日期與景點
   const currentDay = fullData.days.find((d) => d.id === selectedDayId) || fullData.days[0];
-  const spotsForCurrentDay = currentDay?.spots || [];
+  const allSpotsForCurrentDay = currentDay?.spots || [];
+
+  // 類別過濾
+  const spotsForCurrentDay = categoryFilter === 'ALL'
+    ? allSpotsForCurrentDay
+    : allSpotsForCurrentDay.filter((s) => s.category === categoryFilter);
 
   // 自動比對當日住宿：當天日期落在 [check_in, check_out] 之間
   const matchingAccommodation = fullData.accommodations.find((acc) => {
@@ -447,227 +505,415 @@ function TripDetailInner({ params }: PageProps) {
     return currentDay.date >= acc.check_in && currentDay.date <= acc.check_out;
   });
 
+  // 計算桌面版當前選取的地圖定位目標
+  const activeSpot = allSpotsForCurrentDay.find((s) => s.id === activeSpotId);
+  const activeMapLocation = activeSpot
+    ? `${activeSpot.title} ${activeSpot.address || ''}`
+    : matchingAccommodation
+    ? `${matchingAccommodation.name} ${matchingAccommodation.address || ''}`
+    : allSpotsForCurrentDay.length > 0
+    ? `${allSpotsForCurrentDay[0].title} ${allSpotsForCurrentDay[0].address || ''}`
+    : fullData.trip.title;
+
+  const activeMapTitle = activeSpot
+    ? activeSpot.title
+    : matchingAccommodation
+    ? `🏨 ${matchingAccommodation.name}`
+    : '當日景點分佈';
+
+  const totalSpotsInTrip = fullData.days.reduce((acc, d) => acc + (d.spots?.length || 0), 0);
+
+  const navTabs: { id: TabType; label: string; icon: any; count?: number }[] = [
+    { id: 'itinerary', label: '每日行程', icon: Calendar, count: totalSpotsInTrip },
+    { id: 'flights', label: '航班對照', icon: Plane, count: fullData.flights.length },
+    { id: 'accommodations', label: '住宿資訊', icon: Building2, count: fullData.accommodations.length },
+    { id: 'settings', label: '旅程設定', icon: Settings },
+  ];
+
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
-      {/* 頂部導航列 */}
-      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200 px-4 h-14 flex items-center justify-between shadow-2xs">
-        <div className="flex items-center gap-2 min-w-0">
-          <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold text-sm shrink-0">
-            ✈️
-          </div>
-          <div className="min-w-0">
-            <h1 className="text-sm font-bold text-slate-800 truncate">{fullData.trip.title}</h1>
-            <p className="text-[10px] text-slate-400">
-              {fullData.trip.start_date} ~ {fullData.trip.end_date}
-            </p>
+    <div className="min-h-screen bg-slate-50/70 flex flex-col selection:bg-blue-100">
+      {/* 頂部沉浸式 Hero 旅遊橫幅 (Wanderlust Destination Header) */}
+      <section className="bg-gradient-to-r from-blue-700 via-indigo-700 to-sky-600 text-white relative overflow-hidden shadow-lg">
+        {/* 背景環境裝飾光暈 */}
+        <div className="absolute -right-20 -top-20 w-80 h-80 bg-white/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute left-1/3 -bottom-24 w-72 h-72 bg-sky-400/15 rounded-full blur-2xl pointer-events-none" />
+
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-7 relative z-10">
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-5">
+            <div className="space-y-3">
+              {/* 頂部微標籤組 */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={() => router.push('/')}
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-white/90 hover:text-white bg-white/15 hover:bg-white/25 backdrop-blur-md px-3 py-1.5 rounded-xl transition-all cursor-pointer shadow-2xs"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>所有旅程</span>
+                </button>
+                <span className="text-xs font-mono font-bold bg-white/20 backdrop-blur-md px-2.5 py-1 rounded-xl text-white">
+                  房間代碼：{fullData.trip.slug}
+                </span>
+                <span className="text-xs font-bold bg-amber-400 text-amber-950 px-2.5 py-1 rounded-xl shadow-xs">
+                  共 {fullData.days.length} 天行程
+                </span>
+                {isOfflineMode && (
+                  <span className="inline-flex items-center gap-1 text-[11px] bg-rose-500/90 text-white px-2.5 py-1 rounded-xl font-bold">
+                    <WifiOff className="w-3.5 h-3.5" />
+                    <span>離線快取</span>
+                  </span>
+                )}
+              </div>
+
+              {/* 旅程大標題 */}
+              <h1 className="text-2xl sm:text-3xl md:text-4xl font-black text-white tracking-tight drop-shadow-xs">
+                {fullData.trip.title}
+              </h1>
+
+              {/* 日期與當前成員資訊 */}
+              <div className="flex items-center gap-3 text-xs text-blue-100 font-medium flex-wrap">
+                <span className="inline-flex items-center gap-1.5">
+                  <Calendar className="w-4 h-4 text-blue-200" />
+                  {fullData.trip.start_date} ~ {fullData.trip.end_date}
+                </span>
+                <span>•</span>
+                <span className="inline-flex items-center gap-1.5">
+                  <User className="w-4 h-4 text-blue-200" />
+                  我的身份：<span className="font-bold text-white underline decoration-white/40">{currentMember || '未設定'}</span>
+                </span>
+              </div>
+            </div>
+
+            {/* 右側快速操作按鈕組 */}
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={() => setShowNicknameModal(true)}
+                className="px-4 py-2.5 bg-white/15 hover:bg-white/25 backdrop-blur-md text-white font-bold rounded-2xl text-xs transition-all cursor-pointer border border-white/20"
+              >
+                修改暱稱
+              </button>
+              <button
+                onClick={() => setShowShareModal(true)}
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-white text-blue-700 hover:bg-blue-50 font-black rounded-2xl text-xs shadow-lg shadow-black/10 active:scale-95 transition-all cursor-pointer"
+              >
+                <Share2 className="w-4 h-4" />
+                <span>邀請旅伴加入</span>
+              </button>
+            </div>
           </div>
         </div>
+      </section>
 
-        <div className="flex items-center gap-1.5">
-          {/* 離線或本地模式提醒徽章 */}
-          {isOfflineMode && (
-            <span className="inline-flex items-center gap-1 text-[10px] bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full border border-amber-200">
-              <WifiOff className="w-3 h-3" />
-              離線快取
-            </span>
-          )}
-
-          {/* 暱稱按鈕 */}
-          <button
-            onClick={() => setShowNicknameModal(true)}
-            className="inline-flex items-center gap-1 text-xs text-slate-700 bg-slate-100 hover:bg-slate-200 px-2.5 py-1.5 rounded-xl transition-colors"
-          >
-            <User className="w-3.5 h-3.5 text-slate-500" />
-            <span className="font-semibold max-w-[60px] truncate">{currentMember || '設定暱稱'}</span>
-          </button>
-
-          {/* 分享按鈕 */}
-          <button
-            onClick={() => setShowShareModal(true)}
-            className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-xl transition-colors"
-            title="邀請好友"
-          >
-            <Share2 className="w-4 h-4" />
-          </button>
-        </div>
-      </header>
-
-      {/* 主要內容區域 */}
-      <main className="flex-1 max-w-md w-full mx-auto">
-        {/* 1. 每日行程分頁 */}
-        {currentTab === 'itinerary' && (
-          <div className="pb-28">
-            {/* 天數滑動列 */}
-            <DaySelector
-              days={fullData.days}
-              selectedDayId={selectedDayId}
-              onSelectDay={(id) => setSelectedDayId(id)}
-            />
-
-            <div className="p-4 space-y-4">
-              {/* 當日住宿頂部橫幅 (自動帶入) */}
-              {matchingAccommodation && (
-                <div className="bg-gradient-to-r from-blue-500 to-indigo-600 rounded-2xl p-3.5 text-white shadow-md shadow-blue-100 flex items-center justify-between">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <span className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
-                      <Building2 className="w-4 h-4 text-white" />
+      {/* 桌面版次級導航列 (Sticky Sub-Navigation) */}
+      <nav className="hidden md:block sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/90 shadow-2xs">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between">
+          <div className="flex items-center gap-1">
+            {navTabs.map((tab) => {
+              const Icon = tab.icon;
+              const isActive = currentTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setCurrentTab(tab.id)}
+                  className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                    isActive
+                      ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/20'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                  }`}
+                >
+                  <Icon className={`w-3.5 h-3.5 ${isActive ? 'stroke-[2.5]' : ''}`} />
+                  <span>{tab.label}</span>
+                  {tab.count !== undefined && tab.count > 0 && (
+                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                      isActive ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-600'
+                    }`}>
+                      {tab.count}
                     </span>
-                    <div className="min-w-0">
-                      <span className="text-[10px] font-semibold text-blue-100 block">今晚入住</span>
-                      <h4 className="text-xs font-bold truncate">{matchingAccommodation.name}</h4>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="text-xs text-slate-400 font-medium">
+            免帳號多人同步・變更自動即時儲存
+          </div>
+        </div>
+      </nav>
+
+      {/* 1. 每日行程分頁 */}
+      {currentTab === 'itinerary' && (
+        <>
+          {/* 天數滑動選擇列 */}
+          <DaySelector
+            days={fullData.days}
+            selectedDayId={selectedDayId}
+            onSelectDay={(id) => {
+              setSelectedDayId(id);
+              const targetDay = fullData.days.find((d) => d.id === id);
+              if (targetDay && targetDay.spots.length > 0) {
+                setActiveSpotId(targetDay.spots[0].id);
+              } else {
+                setActiveSpotId('');
+              }
+            }}
+          />
+
+          {/* 主要雙欄內容容器 */}
+          <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-28 md:pb-16">
+            <div className="flex flex-col lg:flex-row gap-8 items-start">
+              {/* 左側：行程時間軸與景點卡片清單 */}
+              <div className="w-full lg:w-7/12 xl:w-3/5 space-y-4">
+                {/* 當日住宿橫幅 (自動帶入) */}
+                {matchingAccommodation && (
+                  <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-indigo-700 rounded-3xl p-5 text-white shadow-md shadow-blue-500/10 flex items-center justify-between">
+                    <div className="flex items-center gap-3.5 min-w-0">
+                      <span className="w-11 h-11 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center shrink-0 shadow-inner">
+                        <Building2 className="w-5 h-5 text-white" />
+                      </span>
+                      <div className="min-w-0">
+                        <span className="text-[11px] font-bold text-blue-100 uppercase tracking-wider block">今晚入住飯店</span>
+                        <h4 className="text-sm sm:text-base font-black truncate">{matchingAccommodation.name}</h4>
+                        {matchingAccommodation.address && (
+                          <p className="text-xs text-blue-100/90 truncate mt-0.5">{matchingAccommodation.address}</p>
+                        )}
+                      </div>
                     </div>
+                    <a
+                      href={
+                        matchingAccommodation.google_map_url ||
+                        getGoogleMapsSearchUrl(`${matchingAccommodation.name} ${matchingAccommodation.address || ''}`)
+                      }
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="shrink-0 bg-white text-blue-600 hover:bg-blue-50 text-xs font-black px-4 py-2 rounded-2xl shadow-xs active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer ml-3"
+                    >
+                      <MapPin className="w-3.5 h-3.5" />
+                      <span>導航</span>
+                    </a>
                   </div>
-                  <a
-                    href={
-                      matchingAccommodation.google_map_url ||
-                      getGoogleMapsSearchUrl(`${matchingAccommodation.name} ${matchingAccommodation.address || ''}`)
-                    }
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="shrink-0 bg-white text-blue-600 text-xs font-bold px-3 py-1.5 rounded-xl shadow-xs active:scale-95 transition-all flex items-center gap-1"
-                  >
-                    <MapPin className="w-3.5 h-3.5" />
-                    導航
-                  </a>
-                </div>
-              )}
+                )}
 
-              {/* 景點時間軸清單 */}
-              <div>
-                <div className="flex justify-between items-center mb-3">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                    當日規劃景點 ({spotsForCurrentDay.length})
-                  </h3>
-                  <button
-                    onClick={() => setShowAddSpotModal(true)}
-                    className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-xl transition-all"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    新增地點
-                  </button>
-                </div>
-
-                {spotsForCurrentDay.length > 0 ? (
-                  spotsForCurrentDay.map((spot) => (
-                    <SpotCard
-                      key={spot.id}
-                      spot={spot}
-                      currentMember={currentMember}
-                      onVote={handleVote}
-                      onAddComment={handleAddComment}
-                      onDeleteSpot={handleDeleteSpot}
-                    />
-                  ))
-                ) : (
-                  <div className="text-center py-12 bg-white rounded-3xl border border-dashed border-slate-200 p-6">
-                    <div className="w-12 h-12 rounded-2xl bg-slate-50 text-slate-400 flex items-center justify-center mx-auto mb-3">
-                      <Calendar className="w-6 h-6" />
+                {/* 景點時間軸工具列 (含分類篩選晶片) */}
+                <div className="bg-white p-4 rounded-3xl border border-slate-200/90 shadow-2xs space-y-3">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <h3 className="text-base font-black text-slate-900 tracking-tight">
+                        本日行程時間軸 ({allSpotsForCurrentDay.length})
+                      </h3>
+                      <p className="text-xs text-slate-400 mt-0.5">點選地點卡片可在右側地圖即時聚焦</p>
                     </div>
-                    <h4 className="text-sm font-bold text-slate-700">今天尚未加入景點</h4>
-                    <p className="text-xs text-slate-400 mt-1 mb-4">點擊下方按鈕，把想去的地方或餐廳排進來吧！</p>
+
                     <button
                       onClick={() => setShowAddSpotModal(true)}
-                      className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs shadow-xs"
+                      className="inline-flex items-center gap-1.5 text-xs font-black text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 px-4 py-2.5 rounded-2xl shadow-md shadow-blue-500/20 active:scale-95 transition-all cursor-pointer"
                     >
                       <Plus className="w-4 h-4" />
-                      加入第一個景點
+                      新增地點
+                    </button>
+                  </div>
+
+                  {/* 類別篩選標籤 */}
+                  <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-1">
+                    {[
+                      { key: 'ALL', label: '全部地點' },
+                      { key: 'ATTRACTION', label: '熱門景點' },
+                      { key: 'FOOD', label: '美食餐廳' },
+                      { key: 'SHOPPING', label: '購物採買' },
+                      { key: 'TRANSPORT', label: '交通移動' },
+                    ].map((f) => (
+                      <button
+                        key={f.key}
+                        onClick={() => setCategoryFilter(f.key)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0 ${
+                          categoryFilter === f.key
+                            ? 'bg-slate-900 text-white shadow-xs'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 景點列表 (帶垂直時間軸連線) */}
+                {spotsForCurrentDay.length > 0 ? (
+                  <div className="pt-2">
+                    {spotsForCurrentDay.map((spot, idx) => (
+                      <SpotCard
+                        key={spot.id}
+                        spot={spot}
+                        index={idx}
+                        currentMember={currentMember}
+                        isSelected={spot.id === activeSpotId}
+                        onSelectSpot={(id) => setActiveSpotId(id)}
+                        onVote={handleVote}
+                        onAddComment={handleAddComment}
+                        onDeleteSpot={handleDeleteSpot}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-16 bg-white/80 rounded-3xl border border-dashed border-slate-200 p-8 shadow-xs">
+                    <div className="w-16 h-16 rounded-3xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto mb-4 shadow-inner">
+                      <Calendar className="w-8 h-8" />
+                    </div>
+                    <h4 className="text-lg font-black text-slate-800 tracking-tight">本日尚未加入任何行程</h4>
+                    <p className="text-xs text-slate-400 mt-1.5 mb-6 max-w-sm mx-auto leading-relaxed">
+                      點擊下方按鈕，把想去的美食店家、知名景點或轉運站點排進今天的路線吧！
+                    </p>
+                    <button
+                      onClick={() => setShowAddSpotModal(true)}
+                      className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-black rounded-2xl text-xs shadow-md shadow-blue-500/25 active:scale-95 transition-all cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4" />
+                      加入本日第一個地點
                     </button>
                   </div>
                 )}
               </div>
-            </div>
-          </div>
-        )}
 
-        {/* 2. 獨立航班分頁 */}
-        {currentTab === 'flights' && (
+              {/* 右側：桌面專屬互動地圖常駐區 (Sticky Companion) */}
+              <div className="hidden lg:block lg:w-5/12 xl:w-2/5 sticky top-20 self-start">
+                <MapViewer
+                  activeLocation={activeMapLocation}
+                  activeTitle={activeMapTitle}
+                  spots={allSpotsForCurrentDay}
+                  selectedSpotId={activeSpotId}
+                  onSelectSpot={(spotId) => {
+                    if (spotId === 'acc' && matchingAccommodation) {
+                      setActiveSpotId('');
+                    } else {
+                      setActiveSpotId(spotId);
+                    }
+                  }}
+                  accommodationName={matchingAccommodation?.name}
+                  accommodationAddress={matchingAccommodation?.address}
+                />
+              </div>
+            </div>
+          </main>
+        </>
+      )}
+
+      {/* 2. 獨立航班分頁 */}
+      {currentTab === 'flights' && (
+        <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 pb-28 md:pb-16">
           <FlightSection
             flights={fullData.flights}
             currentMember={currentMember}
             onAddFlight={handleAddFlight}
             onDeleteFlight={handleDeleteFlight}
           />
-        )}
+        </main>
+      )}
 
-        {/* 3. 住宿資訊分頁 */}
-        {currentTab === 'accommodations' && (
+      {/* 3. 住宿資訊分頁 */}
+      {currentTab === 'accommodations' && (
+        <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 pb-28 md:pb-16">
           <AccommodationSection
             accommodations={fullData.accommodations}
             onAddAccommodation={handleAddAccommodation}
             onDeleteAccommodation={handleDeleteAccommodation}
           />
-        )}
+        </main>
+      )}
 
-        {/* 4. 旅程設定與成員分頁 */}
-        {currentTab === 'settings' && (
-          <div className="p-4 space-y-4 pb-28">
-            <h2 className="text-lg font-bold text-slate-800">旅程設定與管理</h2>
+      {/* 4. 旅程設定與管理分頁 */}
+      {currentTab === 'settings' && (
+        <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-28 md:pb-16">
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-2xl font-black text-slate-900 tracking-tight">旅程設定與房間管理</h2>
+              <p className="text-xs text-slate-500 mt-1">管理你的成員暱稱、邀請好友網址與主辦人安全防呆管理碼</p>
+            </div>
 
-            {/* 個人暱稱修改 */}
-            <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs">
-              <h3 className="text-sm font-bold text-slate-800 mb-1">我的暱稱</h3>
-              <p className="text-xs text-slate-500 mb-3">修改在此旅程中顯示的名字</p>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={currentMember}
-                  onChange={(e) => setCurrentMember(e.target.value)}
-                  className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold"
-                />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              {/* 個人暱稱修改卡片 */}
+              <div className="bg-white rounded-3xl p-6 border border-slate-200/90 shadow-sm">
+                <div className="flex items-center gap-3 mb-2">
+                  <span className="w-10 h-10 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+                    <User className="w-5 h-5" />
+                  </span>
+                  <div>
+                    <h3 className="text-base font-black text-slate-900 tracking-tight">我的成員暱稱</h3>
+                    <p className="text-xs text-slate-400">在行程、機票與留言中顯示的名字</p>
+                  </div>
+                </div>
+                <div className="flex gap-2 mt-4">
+                  <input
+                    type="text"
+                    value={currentMember}
+                    onChange={(e) => setCurrentMember(e.target.value)}
+                    className="flex-1 px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:ring-2 focus:ring-blue-500 text-slate-900"
+                  />
+                  <button
+                    onClick={() => {
+                      setStoredNickname(currentMember);
+                      alert('暱稱已成功更新！');
+                    }}
+                    className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black transition-all cursor-pointer shadow-xs"
+                  >
+                    儲存
+                  </button>
+                </div>
+              </div>
+
+              {/* 邀請好友卡片 */}
+              <div className="bg-white rounded-3xl p-6 border border-slate-200/90 shadow-sm flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center gap-3 mb-2">
+                    <span className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
+                      <Share2 className="w-5 h-5" />
+                    </span>
+                    <div>
+                      <h3 className="text-base font-black text-slate-900 tracking-tight">邀請好友加入編輯</h3>
+                      <p className="text-xs text-slate-400">免註冊帳號，憑房間網址直接參與</p>
+                    </div>
+                  </div>
+                </div>
                 <button
-                  onClick={() => setStoredNickname(currentMember)}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold"
+                  onClick={() => setShowShareModal(true)}
+                  className="w-full py-3 bg-blue-50 hover:bg-blue-100 text-blue-700 font-black rounded-2xl text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer mt-4"
                 >
-                  儲存
+                  <Share2 className="w-4 h-4" />
+                  <span>開啟邀請分享面板</span>
                 </button>
               </div>
             </div>
 
-            {/* 邀請朋友 */}
-            <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs">
-              <h3 className="text-sm font-bold text-slate-800 mb-1">邀請好友</h3>
-              <p className="text-xs text-slate-500 mb-3">所有人憑此專屬房間網址即可免登入共同編輯</p>
-              <button
-                onClick={() => setShowShareModal(true)}
-                className="w-full py-2.5 bg-blue-50 text-blue-600 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5"
-              >
-                <Share2 className="w-4 h-4" />
-                開啟邀請分享視窗
-              </button>
-            </div>
-
             {/* 主辦人防呆危險區塊 */}
-            <div className="bg-white rounded-2xl p-4 border border-rose-100 shadow-xs">
-              <h3 className="text-sm font-bold text-rose-700 flex items-center gap-1.5 mb-1">
-                <ShieldAlert className="w-4 h-4" />
-                主辦人管理專區
+            <div className="bg-white rounded-3xl p-6 border border-rose-200/90 shadow-sm">
+              <h3 className="text-base font-black text-rose-700 flex items-center gap-2 mb-1.5">
+                <ShieldAlert className="w-5 h-5" />
+                主辦人安全防呆管理專區
               </h3>
-              <p className="text-xs text-slate-500 mb-3">
-                執行關鍵或破壞性操作需輸入 4 位數管理 PIN 碼防呆
+              <p className="text-xs text-slate-500 mb-5 leading-relaxed">
+                為防止群組好友誤觸刪除，清除整趟旅程或修改房間核心時間需要輸入建立時設定的 4 位數 PIN 碼。
               </p>
               <button
                 onClick={triggerDeleteTrip}
-                className="w-full py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors"
+                className="py-3 px-5 bg-rose-50 hover:bg-rose-100 text-rose-600 font-black rounded-2xl text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
               >
                 <Trash2 className="w-4 h-4" />
-                刪除此整趟旅程
+                <span>刪除此整趟旅程房間</span>
               </button>
             </div>
           </div>
-        )}
-      </main>
+        </main>
+      )}
 
-      {/* 手機底部固定導航列 */}
+      {/* 行動端底部固定導航列 (桌面版自動隱藏) */}
       <BottomNav currentTab={currentTab} onSelectTab={(tab) => setCurrentTab(tab)} />
 
-      {/* 浮動新增景點快捷按鈕 (僅在行程分頁顯示) */}
+      {/* 行動端浮動新增按鈕 (桌面版自動隱藏) */}
       {currentTab === 'itinerary' && (
         <button
           onClick={() => setShowAddSpotModal(true)}
-          className="fixed bottom-20 right-4 z-30 w-12 h-12 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-lg shadow-blue-300 flex items-center justify-center active:scale-95 transition-all"
+          className="md:hidden fixed bottom-20 right-4 z-30 w-14 h-14 bg-gradient-to-br from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-full shadow-xl shadow-blue-500/35 flex items-center justify-center active:scale-95 transition-all cursor-pointer"
           title="新增景點"
         >
-          <Plus className="w-6 h-6 stroke-[2.5]" />
+          <Plus className="w-7 h-7 stroke-[2.5]" />
         </button>
       )}
 
