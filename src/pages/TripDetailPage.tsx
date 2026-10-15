@@ -1,6 +1,6 @@
 
 
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { 
   FullTripData, 
@@ -10,11 +10,23 @@ import {
   CategoryType,
   TripMember
 } from '@/types/travel';
-import { fetchFullTrip, supabase, deleteTrip, registerTripMember } from '@/lib/supabase';
+import { 
+  fetchFullTrip, 
+  supabase, 
+  deleteTrip, 
+  registerTripMember,
+  updateTripTitle,
+  updateDayTheme,
+  leaveTripMember,
+  removeTripMember
+} from '@/lib/supabase';
 import { 
   getStoredNickname, 
-  setStoredNickname, 
+  getRoomNickname,
+  setRoomNickname,
+  removeRoomNickname,
   setLocalTripCache, 
+  removeLocalTripCache,
   getDeviceId 
 } from '@/lib/storage';
 import { getGoogleMapsSearchUrl } from '@/lib/maps';
@@ -50,10 +62,10 @@ import {
   Utensils,
   ShoppingBag,
   Bus,
-  Layers
+  Layers,
+  Edit3,
+  UserMinus
 } from 'lucide-react';
-
-
 
 export default function TripDetailPage() {
   const { slug = '' } = useParams<{ slug: string }>();
@@ -72,6 +84,12 @@ function TripDetailInner({ slug }: { slug: string }) {
   const [isOfflineMode, setIsOfflineMode] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
 
+  // 標題與主題編輯狀態
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [tempTitle, setTempTitle] = useState('');
+  const [isEditingTheme, setIsEditingTheme] = useState(false);
+  const [tempTheme, setTempTheme] = useState('');
+
   // 彈窗狀態
   const [showNicknameModal, setShowNicknameModal] = useState(false);
   const [showAddSpotModal, setShowAddSpotModal] = useState(false);
@@ -80,12 +98,20 @@ function TripDetailInner({ slug }: { slug: string }) {
   const [showAdminPinModal, setShowAdminPinModal] = useState(false);
   const [pendingAdminAction, setPendingAdminAction] = useState<{ title: string; onConfirm: () => Promise<void> | void } | null>(null);
 
+  // 保持即時回呼內的最新狀態參照
+  const fullDataRef = useRef<FullTripData | null>(null);
+  fullDataRef.current = fullData;
+  const currentMemberRef = useRef<string>('');
+  currentMemberRef.current = currentMember;
+
   // 初始化載入
   useEffect(() => {
-    const savedName = getStoredNickname();
-    if (savedName) {
-      setCurrentMember(savedName);
+    // 1. 檢查此特定房間專屬暱稱 (Room-scoped)
+    const roomNickname = getRoomNickname(slug);
+    if (roomNickname) {
+      setCurrentMember(roomNickname);
     } else {
+      // 首次進入此房間：絕不在背景靜默登記，強制彈出設定視窗確認
       setShowNicknameModal(true);
     }
 
@@ -100,9 +126,9 @@ function TripDetailInner({ slug }: { slug: string }) {
             setActiveSpotId(data.days[0].spots[0].id);
           }
         }
-        // 若本地已有暱稱，自動向房間登記成員
-        if (savedName) {
-          registerTripMember(data.trip.id, slug, savedName, getDeviceId()).then((res) => {
+        // 若使用者在此房間已有經確認的專屬暱稱，向雲端確認登記
+        if (roomNickname) {
+          registerTripMember(data.trip.id, slug, roomNickname, getDeviceId()).then((res) => {
             if (res.member) {
               setFullData((prev) => {
                 if (!prev) return prev;
@@ -122,10 +148,79 @@ function TripDetailInner({ slug }: { slug: string }) {
 
     loadData();
 
-    // 即時協同訂閱
+    // 斷線重連或重新聚焦時主動全量對齊狀態
+    const handleSyncOnReconnect = () => {
+      fetchFullTrip(slug).then((updated) => {
+        if (updated) {
+          setFullData(updated);
+        } else {
+          // 若雲端回報 404（已刪除）
+          alert('此旅程房間已被刪除或不存在，即將返回首頁。');
+          navigate('/');
+        }
+      });
+    };
+    window.addEventListener('online', handleSyncOnReconnect);
+
+    // 即時協同訂閱 (WebSocket)
     if (supabase) {
       const channel = supabase
         .channel(`trip-realtime-${slug}`)
+        // 監聽 trips 表：刪除事件
+        .on(
+          'postgres_changes',
+          { event: 'DELETE', schema: 'public', table: 'trips' },
+          (payload) => {
+            if (payload.old && payload.old.id === fullDataRef.current?.trip.id) {
+              removeLocalTripCache(slug);
+              alert('此旅程房間已被主辦人刪除！即將返回首頁。');
+              navigate('/');
+            }
+          }
+        )
+        // 監聽 trips 表：標題修改事件
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'trips' },
+          (payload) => {
+            if (payload.new && payload.new.id === fullDataRef.current?.trip.id) {
+              setFullData((prev) => prev ? { ...prev, trip: { ...prev.trip, title: payload.new.title } } : prev);
+            }
+          }
+        )
+        // 監聽 itinerary_days 表：每日主題修改
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'itinerary_days' },
+          () => {
+            fetchFullTrip(slug).then((updated) => {
+              if (updated) setFullData(updated);
+            });
+          }
+        )
+        // 監聽 trip_members 表：退出或主辦人剔除
+        .on(
+          'postgres_changes',
+          { event: 'DELETE', schema: 'public', table: 'trip_members' },
+          (payload) => {
+            const currentDevId = getDeviceId();
+            const myName = (currentMemberRef.current || '').trim().toLowerCase();
+            // 若被刪除的成員為當前裝置或暱稱
+            if (
+              (payload.old?.device_id && payload.old.device_id === currentDevId) ||
+              (payload.old?.nickname && payload.old.nickname.toLowerCase() === myName)
+            ) {
+              removeLocalTripCache(slug);
+              alert('你已被主辦人自此旅程名單中移除。即將返回首頁。');
+              navigate('/');
+              return;
+            }
+            // 若為他人被移除，重新拉取最新名單
+            fetchFullTrip(slug).then((updated) => {
+              if (updated) setFullData(updated);
+            });
+          }
+        )
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'trip_members' },
@@ -183,11 +278,16 @@ function TripDetailInner({ slug }: { slug: string }) {
         .subscribe();
 
       return () => {
+        window.removeEventListener('online', handleSyncOnReconnect);
         if (supabase) {
           supabase.removeChannel(channel);
         }
       };
     }
+
+    return () => {
+      window.removeEventListener('online', handleSyncOnReconnect);
+    };
   }, [slug]);
 
   // 更新快取並同步 state
@@ -857,6 +957,73 @@ function TripDetailInner({ slug }: { slug: string }) {
     setShowAdminPinModal(true);
   };
 
+  // 8. 儲存旅程主題名稱
+  const handleSaveTripTitle = async () => {
+    if (!fullData || !tempTitle.trim()) return;
+    const clean = tempTitle.trim();
+    setIsEditingTitle(false);
+    setFullData((prev) => (prev ? { ...prev, trip: { ...prev.trip, title: clean } } : prev));
+    const res = await updateTripTitle(fullData.trip.id, slug, clean);
+    if (!res.success) {
+      alert('修改旅程標題失敗：' + (res.error || '未知錯誤'));
+    }
+  };
+
+  // 9. 儲存每日自訂主題
+  const handleSaveDayTheme = async (dayId: string) => {
+    if (!fullData) return;
+    const cleanTheme = tempTheme.trim();
+    setIsEditingTheme(false);
+    setFullData((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        days: prev.days.map((d) => (d.id === dayId ? { ...d, theme: cleanTheme } : d)),
+      };
+    });
+    const res = await updateDayTheme(dayId, slug, cleanTheme);
+    if (!res.success) {
+      alert('修改每日主題失敗：' + (res.error || '未知錯誤'));
+    }
+  };
+
+  // 10. 成員自行退出房間
+  const handleLeaveTrip = async () => {
+    if (!fullData) return;
+    if (!window.confirm('確定要退出此旅程房間嗎？退出後本機將清除此房間紀錄，但你已排定的景點與留言仍會保留。')) {
+      return;
+    }
+    await leaveTripMember(fullData.trip.id, slug, getDeviceId(), currentMember);
+    alert('你已成功退出此旅程房間。');
+    navigate('/');
+  };
+
+  // 11. 主辦人強制移除成員 (需驗證 PIN 碼)
+  const handleKickMember = (member: TripMember) => {
+    if (!fullData) return;
+    setPendingAdminAction({
+      title: `確定要將成員「${member.nickname}」自此房間中移除嗎？此操作需驗證主辦人 PIN 碼。`,
+      onConfirm: async () => {
+        const res = await removeTripMember(fullData.trip.id, slug, member.id);
+        if (res.success) {
+          setFullData((prev) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              members: prev.members.filter((m) => m.id !== member.id),
+            };
+          });
+          setShowAdminPinModal(false);
+          setPendingAdminAction(null);
+          alert(`成員「${member.nickname}」已被移除。`);
+        } else {
+          alert('移除成員失敗：' + (res.error || '未知錯誤'));
+        }
+      },
+    });
+    setShowAdminPinModal(true);
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -870,12 +1037,15 @@ function TripDetailInner({ slug }: { slug: string }) {
 
   if (!fullData) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center">
+      <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center bg-slate-50">
+        <div className="w-16 h-16 rounded-3xl bg-rose-50 text-rose-500 flex items-center justify-center mb-4 shadow-sm">
+          <ShieldAlert className="w-8 h-8" />
+        </div>
         <h2 className="text-xl font-black text-slate-900 mb-2">找不到此旅程房間</h2>
-        <p className="text-xs text-slate-500 mb-6">請確認分享連結代碼是否正確，或此旅程已結束</p>
+        <p className="text-xs text-slate-500 mb-6">此旅程不存在或已被主辦人刪除。本地快取已為您同步清除。</p>
         <button
           onClick={() => navigate('/')}
-          className="px-6 py-3 bg-blue-600 text-white rounded-2xl text-xs font-bold shadow-md hover:bg-blue-700 transition-all cursor-pointer"
+          className="px-6 py-3 bg-blue-600 text-white rounded-2xl text-xs font-black shadow-md hover:bg-blue-700 transition-all cursor-pointer"
         >
           返回首頁
         </button>
@@ -957,10 +1127,47 @@ function TripDetailInner({ slug }: { slug: string }) {
                 )}
               </div>
 
-              {/* 旅程大標題 */}
-              <h1 className="text-2xl sm:text-3xl md:text-4xl font-black text-white tracking-tight drop-shadow-xs">
-                {fullData.trip.title}
-              </h1>
+              {/* 旅程大標題 (支援即時修改) */}
+              {isEditingTitle ? (
+                <div className="flex items-center gap-2 mt-1 flex-wrap">
+                  <input
+                    type="text"
+                    value={tempTitle}
+                    onChange={(e) => setTempTitle(e.target.value)}
+                    className="px-3.5 py-1.5 bg-white/20 border border-white/40 rounded-xl text-lg sm:text-2xl font-black text-white focus:outline-none focus:ring-2 focus:ring-white placeholder:text-white/60"
+                    placeholder="輸入旅程名稱..."
+                    autoFocus
+                  />
+                  <button
+                    onClick={handleSaveTripTitle}
+                    className="px-4 py-2 bg-white text-blue-700 hover:bg-blue-50 font-black rounded-xl text-xs shadow-xs cursor-pointer"
+                  >
+                    儲存
+                  </button>
+                  <button
+                    onClick={() => setIsEditingTitle(false)}
+                    className="px-3 py-2 text-white/80 hover:text-white font-bold rounded-xl text-xs cursor-pointer"
+                  >
+                    取消
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <h1 className="text-2xl sm:text-3xl md:text-4xl font-black text-white tracking-tight drop-shadow-xs">
+                    {fullData.trip.title}
+                  </h1>
+                  <button
+                    onClick={() => {
+                      setTempTitle(fullData.trip.title);
+                      setIsEditingTitle(true);
+                    }}
+                    className="p-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white/90 hover:text-white transition-all cursor-pointer shadow-2xs"
+                    title="修改旅程名稱"
+                  >
+                    <Edit3 className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
 
               {/* 日期與當前成員資訊 */}
               <div className="flex items-center gap-3 text-xs text-blue-100 font-medium flex-wrap">
@@ -1087,6 +1294,59 @@ function TripDetailInner({ slug }: { slug: string }) {
                     </a>
                   </div>
                 )}
+                {/* 當日自訂主題橫幅與即時編輯 */}
+                <div className="bg-white p-4 rounded-3xl border border-slate-200/90 shadow-2xs flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <span className="w-10 h-10 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-black text-sm shrink-0 shadow-2xs">
+                      D{currentDay.day_number}
+                    </span>
+                    {isEditingTheme ? (
+                      <div className="flex items-center gap-2 flex-1 flex-wrap">
+                        <input
+                          type="text"
+                          value={tempTheme}
+                          onChange={(e) => setTempTheme(e.target.value)}
+                          placeholder="例如：淺草雷門與晴空塔漫遊"
+                          className="flex-1 min-w-[160px] px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:ring-2 focus:ring-blue-500 text-slate-900"
+                          autoFocus
+                        />
+                        <button
+                          onClick={() => handleSaveDayTheme(currentDay.id)}
+                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs"
+                        >
+                          儲存
+                        </button>
+                        <button
+                          onClick={() => setIsEditingTheme(false)}
+                          className="px-3 py-2 text-slate-500 hover:bg-slate-100 rounded-xl text-xs font-bold cursor-pointer"
+                        >
+                          取消
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-sm font-black text-slate-900 truncate">
+                            {currentDay.theme && currentDay.theme.trim() ? currentDay.theme : `第 ${currentDay.day_number} 天行程`}
+                          </h4>
+                          <button
+                            onClick={() => {
+                              setTempTheme(currentDay.theme || '');
+                              setIsEditingTheme(true);
+                            }}
+                            className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                            title="修改當日主題名稱"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        <p className="text-[11px] text-slate-400 font-medium mt-0.5">
+                          {currentDay.date}・自訂主題會即時同步給所有共同編輯者
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
 
                 {/* 景點時間軸工具列 (含分類篩選晶片) */}
                 <div className="bg-white p-4 rounded-3xl border border-slate-200/90 shadow-2xs space-y-3">
@@ -1266,7 +1526,7 @@ function TripDetailInner({ slug }: { slug: string }) {
                         alert('請輸入有效暱稱');
                         return;
                       }
-                      setStoredNickname(currentMember);
+                      setRoomNickname(slug, currentMember);
                       if (fullData) {
                         const res = await registerTripMember(fullData.trip.id, slug, currentMember, getDeviceId());
                         if (res.member) {
@@ -1284,6 +1544,16 @@ function TripDetailInner({ slug }: { slug: string }) {
                     className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black transition-all cursor-pointer shadow-xs"
                   >
                     儲存
+                  </button>
+                </div>
+
+                <div className="mt-4 pt-4 border-t border-slate-100 flex items-center justify-between">
+                  <span className="text-xs text-slate-400 font-medium">不想繼續參與此行程？</span>
+                  <button
+                    onClick={handleLeaveTrip}
+                    className="px-3.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                  >
+                    退出此旅程房間
                   </button>
                 </div>
               </div>
@@ -1394,6 +1664,16 @@ function TripDetailInner({ slug }: { slug: string }) {
                             </p>
                           </div>
                         </div>
+
+                        {!isCurrent && (
+                          <button
+                            onClick={() => handleKickMember(member)}
+                            className="p-2 text-slate-300 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all cursor-pointer shrink-0"
+                            title="主辦人移除此成員 (需輸入 PIN 碼)"
+                          >
+                            <UserMinus className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
 
                       {/* 成員在旅程中的參與動態標籤 */}
@@ -1489,9 +1769,10 @@ function TripDetailInner({ slug }: { slug: string }) {
       {/* 各彈窗組件 */}
       <NicknameModal
         isOpen={showNicknameModal}
-        initialNickname={currentMember}
+        initialNickname={currentMember || getStoredNickname()}
         onSave={async (name) => {
           setCurrentMember(name);
+          setRoomNickname(slug, name);
           setShowNicknameModal(false);
           if (fullData) {
             const res = await registerTripMember(fullData.trip.id, slug, name, getDeviceId());
