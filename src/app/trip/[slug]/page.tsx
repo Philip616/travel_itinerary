@@ -9,7 +9,7 @@ import {
   Accommodation,
   CategoryType
 } from '@/types/travel';
-import { fetchFullTrip, supabase } from '@/lib/supabase';
+import { fetchFullTrip, supabase, deleteTrip } from '@/lib/supabase';
 import { 
   getStoredNickname, 
   setStoredNickname, 
@@ -91,9 +91,10 @@ function TripDetailInner({ params }: PageProps) {
   // 彈窗狀態
   const [showNicknameModal, setShowNicknameModal] = useState(false);
   const [showAddSpotModal, setShowAddSpotModal] = useState(false);
+  const [editingSpot, setEditingSpot] = useState<SpotItem | null>(null);
   const [showShareModal, setShowShareModal] = useState(false);
   const [showAdminPinModal, setShowAdminPinModal] = useState(false);
-  const [pendingAdminAction, setPendingAdminAction] = useState<{ title: string; onConfirm: () => void } | null>(null);
+  const [pendingAdminAction, setPendingAdminAction] = useState<{ title: string; onConfirm: () => Promise<void> | void } | null>(null);
 
   // 初始化載入
   useEffect(() => {
@@ -148,6 +149,24 @@ function TripDetailInner({ params }: PageProps) {
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'accommodations' },
+          () => {
+            fetchFullTrip(slug).then((updated) => {
+              if (updated) setFullData(updated);
+            });
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'accommodation_comments' },
+          () => {
+            fetchFullTrip(slug).then((updated) => {
+              if (updated) setFullData(updated);
+            });
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'spot_comments' },
           () => {
             fetchFullTrip(slug).then((updated) => {
               if (updated) setFullData(updated);
@@ -263,6 +282,60 @@ function TripDetailInner({ params }: PageProps) {
     }
   };
 
+  // 2-1. 修改景點留言
+  const handleEditSpotComment = async (spotId: string, commentId: string, newContent: string) => {
+    if (!fullData || !newContent.trim()) return;
+
+    const newDays = fullData.days.map((day) => {
+      const newSpots = day.spots.map((spot) => {
+        if (spot.id !== spotId) return spot;
+        return {
+          ...spot,
+          comments: (spot.comments || []).map((c) =>
+            c.id === commentId ? { ...c, content: newContent.trim() } : c
+          ),
+        };
+      });
+      return { ...day, spots: newSpots };
+    });
+
+    updateData({ ...fullData, days: newDays });
+
+    if (supabase) {
+      try {
+        await supabase.from('spot_comments').update({ content: newContent.trim() }).eq('id', commentId);
+      } catch (err) {
+        console.warn('雲端修改景點留言失敗:', err);
+      }
+    }
+  };
+
+  // 2-2. 刪除景點留言
+  const handleDeleteSpotComment = async (spotId: string, commentId: string) => {
+    if (!fullData) return;
+
+    const newDays = fullData.days.map((day) => {
+      const newSpots = day.spots.map((spot) => {
+        if (spot.id !== spotId) return spot;
+        return {
+          ...spot,
+          comments: (spot.comments || []).filter((c) => c.id !== commentId),
+        };
+      });
+      return { ...day, spots: newSpots };
+    });
+
+    updateData({ ...fullData, days: newDays });
+
+    if (supabase) {
+      try {
+        await supabase.from('spot_comments').delete().eq('id', commentId);
+      } catch (err) {
+        console.warn('雲端刪除景點留言失敗:', err);
+      }
+    }
+  };
+
   // 3. 新增景點
   const handleAddSpot = async (spotData: Partial<SpotItem>) => {
     if (!fullData || !selectedDayId) return;
@@ -309,6 +382,39 @@ function TripDetailInner({ params }: PageProps) {
         }]);
       } catch (err) {
         console.warn('雲端新增景點失敗:', err);
+      }
+    }
+  };
+
+  // 3-1. 編輯景點
+  const handleEditSpot = async (spotId: string, spotData: Partial<SpotItem>) => {
+    if (!fullData) return;
+
+    const newDays = fullData.days.map((day) => {
+      const newSpots = day.spots.map((spot) => {
+        if (spot.id !== spotId) return spot;
+        return {
+          ...spot,
+          ...spotData,
+        };
+      });
+      return { ...day, spots: newSpots };
+    });
+
+    updateData({ ...fullData, days: newDays });
+
+    if (supabase) {
+      try {
+        await supabase.from('spot_items').update({
+          title: spotData.title,
+          category: spotData.category,
+          time_slot: spotData.time_slot,
+          address: spotData.address,
+          google_map_url: spotData.google_map_url,
+          cost_estimate: spotData.cost_estimate,
+        }).eq('id', spotId);
+      } catch (err) {
+        console.warn('雲端更新景點失敗:', err);
       }
     }
   };
@@ -376,6 +482,38 @@ function TripDetailInner({ params }: PageProps) {
     }
   };
 
+  const handleUpdateFlight = async (flightId: string, flightData: Partial<Flight>) => {
+    if (!fullData) return;
+
+    const updatedFlights = fullData.flights.map((f) => {
+      if (f.id !== flightId) return f;
+      return {
+        ...f,
+        ...flightData,
+      };
+    });
+
+    updateData({ ...fullData, flights: updatedFlights });
+
+    if (supabase) {
+      try {
+        await supabase.from('flights').update({
+          member_name: flightData.member_name,
+          flight_type: flightData.flight_type,
+          flight_number: flightData.flight_number,
+          departure_airport: flightData.departure_airport,
+          arrival_airport: flightData.arrival_airport,
+          departure_time: flightData.departure_time,
+          arrival_time: flightData.arrival_time,
+          terminal: flightData.terminal,
+          note: flightData.note,
+        }).eq('id', flightId);
+      } catch (err) {
+        console.warn('雲端更新航班失敗:', err);
+      }
+    }
+  };
+
   const handleDeleteFlight = async (flightId: string) => {
     if (!fullData) return;
     updateData({
@@ -434,6 +572,40 @@ function TripDetailInner({ params }: PageProps) {
     }
   };
 
+  const handleUpdateAccommodation = async (accId: string, accData: Partial<Accommodation>) => {
+    if (!fullData) return;
+
+    const updatedAccs = fullData.accommodations.map((a) => {
+      if (a.id !== accId) return a;
+      return {
+        ...a,
+        ...accData,
+      };
+    });
+
+    updateData({
+      ...fullData,
+      accommodations: updatedAccs,
+    });
+
+    if (supabase) {
+      try {
+        await supabase.from('accommodations').update({
+          name: accData.name,
+          check_in: accData.check_in,
+          check_out: accData.check_out,
+          address: accData.address,
+          google_map_url: accData.google_map_url,
+          booking_ref: accData.booking_ref,
+          phone: accData.phone,
+          note: accData.note,
+        }).eq('id', accId);
+      } catch (err) {
+        console.warn('雲端更新住宿失敗:', err);
+      }
+    }
+  };
+
   const handleDeleteAccommodation = async (accId: string) => {
     if (!fullData) return;
     updateData({
@@ -450,13 +622,99 @@ function TripDetailInner({ params }: PageProps) {
     }
   };
 
+  // 6-1. 住宿討論留言
+  const handleAddAccommodationComment = async (accId: string, content: string) => {
+    if (!fullData || !content.trim()) return;
+    const author = currentMember || '旅伴';
+
+    const newCommentObj = {
+      id: 'ac_' + Math.random().toString(36).substring(2, 9),
+      accommodation_id: accId,
+      member_name: author,
+      content: content.trim(),
+      created_at: new Date().toISOString(),
+    };
+
+    const newAccs = fullData.accommodations.map((acc) => {
+      if (acc.id !== accId) return acc;
+      return {
+        ...acc,
+        comments: [...(acc.comments || []), newCommentObj],
+      };
+    });
+
+    updateData({ ...fullData, accommodations: newAccs });
+
+    if (supabase) {
+      try {
+        await supabase.from('accommodation_comments').insert([{
+          accommodation_id: accId,
+          member_name: author,
+          content: content.trim(),
+        }]);
+      } catch (err) {
+        console.warn('雲端新增住宿留言失敗:', err);
+      }
+    }
+  };
+
+  // 6-2. 修改住宿留言
+  const handleEditAccommodationComment = async (accId: string, commentId: string, newContent: string) => {
+    if (!fullData || !newContent.trim()) return;
+
+    const newAccs = fullData.accommodations.map((acc) => {
+      if (acc.id !== accId) return acc;
+      return {
+        ...acc,
+        comments: (acc.comments || []).map((c) =>
+          c.id === commentId ? { ...c, content: newContent.trim() } : c
+        ),
+      };
+    });
+
+    updateData({ ...fullData, accommodations: newAccs });
+
+    if (supabase) {
+      try {
+        await supabase.from('accommodation_comments').update({ content: newContent.trim() }).eq('id', commentId);
+      } catch (err) {
+        console.warn('雲端修改住宿留言失敗:', err);
+      }
+    }
+  };
+
+  // 6-3. 刪除住宿留言
+  const handleDeleteAccommodationComment = async (accId: string, commentId: string) => {
+    if (!fullData) return;
+
+    const newAccs = fullData.accommodations.map((acc) => {
+      if (acc.id !== accId) return acc;
+      return {
+        ...acc,
+        comments: (acc.comments || []).filter((c) => c.id !== commentId),
+      };
+    });
+
+    updateData({ ...fullData, accommodations: newAccs });
+
+    if (supabase) {
+      try {
+        await supabase.from('accommodation_comments').delete().eq('id', commentId);
+      } catch (err) {
+        console.warn('雲端刪除住宿留言失敗:', err);
+      }
+    }
+  };
+
   // 7. 防呆操作：刪除整趟旅程 (需輸入 PIN)
   const triggerDeleteTrip = () => {
     setPendingAdminAction({
       title: '刪除整趟旅程',
       onConfirm: async () => {
-        if (supabase && fullData) {
-          await supabase.from('trips').delete().eq('id', fullData.trip.id);
+        if (!fullData) return;
+        const res = await deleteTrip(slug, fullData.trip.id);
+        if (!res.success) {
+          throw new Error(res.error || '刪除旅程失敗，請確認資料庫狀態');
         }
         router.push('/');
       },
@@ -704,7 +962,10 @@ function TripDetailInner({ params }: PageProps) {
                     </div>
 
                     <button
-                      onClick={() => setShowAddSpotModal(true)}
+                      onClick={() => {
+                        setEditingSpot(null);
+                        setShowAddSpotModal(true);
+                      }}
                       className="inline-flex items-center gap-1.5 text-xs font-black text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 px-4 py-2.5 rounded-2xl shadow-md shadow-blue-500/20 active:scale-95 transition-all cursor-pointer"
                     >
                       <Plus className="w-4 h-4" />
@@ -749,6 +1010,12 @@ function TripDetailInner({ params }: PageProps) {
                         onSelectSpot={(id) => setActiveSpotId(id)}
                         onVote={handleVote}
                         onAddComment={handleAddComment}
+                        onEditComment={handleEditSpotComment}
+                        onDeleteComment={handleDeleteSpotComment}
+                        onEditSpot={(spotToEdit) => {
+                          setEditingSpot(spotToEdit);
+                          setShowAddSpotModal(true);
+                        }}
                         onDeleteSpot={handleDeleteSpot}
                       />
                     ))}
@@ -763,7 +1030,10 @@ function TripDetailInner({ params }: PageProps) {
                       點擊下方按鈕，把想去的美食店家、知名景點或轉運站點排進今天的路線吧！
                     </p>
                     <button
-                      onClick={() => setShowAddSpotModal(true)}
+                      onClick={() => {
+                        setEditingSpot(null);
+                        setShowAddSpotModal(true);
+                      }}
                       className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-black rounded-2xl text-xs shadow-md shadow-blue-500/25 active:scale-95 transition-all cursor-pointer"
                     >
                       <Plus className="w-4 h-4" />
@@ -803,6 +1073,7 @@ function TripDetailInner({ params }: PageProps) {
             flights={fullData.flights}
             currentMember={currentMember}
             onAddFlight={handleAddFlight}
+            onUpdateFlight={handleUpdateFlight}
             onDeleteFlight={handleDeleteFlight}
           />
         </main>
@@ -813,8 +1084,13 @@ function TripDetailInner({ params }: PageProps) {
         <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 pb-28 md:pb-16">
           <AccommodationSection
             accommodations={fullData.accommodations}
+            currentMember={currentMember}
             onAddAccommodation={handleAddAccommodation}
+            onUpdateAccommodation={handleUpdateAccommodation}
             onDeleteAccommodation={handleDeleteAccommodation}
+            onAddComment={handleAddAccommodationComment}
+            onEditComment={handleEditAccommodationComment}
+            onDeleteComment={handleDeleteAccommodationComment}
           />
         </main>
       )}
@@ -909,7 +1185,10 @@ function TripDetailInner({ params }: PageProps) {
       {/* 行動端浮動新增按鈕 (桌面版自動隱藏) */}
       {currentTab === 'itinerary' && (
         <button
-          onClick={() => setShowAddSpotModal(true)}
+          onClick={() => {
+            setEditingSpot(null);
+            setShowAddSpotModal(true);
+          }}
           className="md:hidden fixed bottom-20 right-4 z-30 w-14 h-14 bg-gradient-to-br from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-full shadow-xl shadow-blue-500/35 flex items-center justify-center active:scale-95 transition-all cursor-pointer"
           title="新增景點"
         >
@@ -930,10 +1209,15 @@ function TripDetailInner({ params }: PageProps) {
 
       <AddSpotModal
         isOpen={showAddSpotModal}
-        onClose={() => setShowAddSpotModal(false)}
+        onClose={() => {
+          setShowAddSpotModal(false);
+          setEditingSpot(null);
+        }}
         dayId={selectedDayId}
         currentMember={currentMember}
+        initialSpot={editingSpot}
         onAddSpot={handleAddSpot}
+        onUpdateSpot={handleEditSpot}
       />
 
       <ShareModal

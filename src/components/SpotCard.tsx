@@ -17,7 +17,8 @@ import {
   ExternalLink,
   DollarSign,
   Compass,
-  Sparkles
+  Sparkles,
+  Pencil
 } from 'lucide-react';
 
 interface SpotCardProps {
@@ -28,6 +29,9 @@ interface SpotCardProps {
   onSelectSpot?: (spotId: string) => void;
   onVote: (spotId: string) => void;
   onAddComment: (spotId: string, content: string) => void;
+  onEditComment?: (spotId: string, commentId: string, newContent: string) => void;
+  onDeleteComment?: (spotId: string, commentId: string) => void;
+  onEditSpot: (spot: SpotItem) => void;
   onDeleteSpot: (spotId: string) => void;
 }
 
@@ -39,10 +43,15 @@ export function SpotCard({
   onSelectSpot,
   onVote,
   onAddComment,
+  onEditComment,
+  onDeleteComment,
+  onEditSpot,
   onDeleteSpot,
 }: SpotCardProps) {
   const [showComments, setShowComments] = useState(false);
   const [newComment, setNewComment] = useState('');
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const [editingCommentText, setEditingCommentText] = useState('');
 
   const votesCount = spot.votes?.filter((v) => v.vote_type === 'UP').length || 0;
   const hasVoted = spot.votes?.some((v) => v.member_name === currentMember && v.vote_type === 'UP');
@@ -141,16 +150,28 @@ export function SpotCard({
             )}
           </div>
 
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onDeleteSpot(spot.id);
-            }}
-            className="text-slate-300 hover:text-rose-500 p-1.5 rounded-xl transition-colors hover:bg-rose-50"
-            title="刪除景點"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onEditSpot(spot);
+              }}
+              className="text-slate-300 hover:text-blue-600 p-1.5 rounded-xl transition-colors hover:bg-blue-50 cursor-pointer"
+              title="編輯地點"
+            >
+              <Pencil className="w-4 h-4" />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDeleteSpot(spot.id);
+              }}
+              className="text-slate-300 hover:text-rose-500 p-1.5 rounded-xl transition-colors hover:bg-rose-50 cursor-pointer"
+              title="刪除景點"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         {/* 景點標題與詳細資訊 */}
@@ -234,15 +255,86 @@ export function SpotCard({
             <div className="space-y-2 mb-3 max-h-48 overflow-y-auto pr-1">
               {spot.comments && spot.comments.length > 0 ? (
                 spot.comments.map((c) => (
-                  <div key={c.id} className="bg-slate-50/90 p-3 rounded-2xl border border-slate-100">
-                    <div className="flex justify-between items-center mb-1">
-                      <span className="font-bold text-slate-800">{c.member_name}</span>
-                      <span className="text-[10px] text-slate-400">
-                        {new Date(c.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </span>
+                  editingCommentId === c.id ? (
+                    <div key={c.id} className="bg-white p-3 rounded-2xl border border-blue-300 shadow-2xs space-y-2">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="font-bold text-slate-800">修改留言</span>
+                        <span className="text-[10px] text-slate-400 font-medium">{c.member_name}</span>
+                      </div>
+                      <input
+                        type="text"
+                        value={editingCommentText}
+                        onChange={(e) => setEditingCommentText(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-800 font-medium"
+                        autoFocus
+                      />
+                      <div className="flex justify-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingCommentId(null);
+                            setEditingCommentText('');
+                          }}
+                          className="px-2.5 py-1 text-slate-500 hover:bg-slate-100 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                        >
+                          取消
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!editingCommentText.trim()}
+                          onClick={() => {
+                            if (!editingCommentText.trim() || !onEditComment) return;
+                            onEditComment(spot.id, c.id, editingCommentText.trim());
+                            setEditingCommentId(null);
+                            setEditingCommentText('');
+                          }}
+                          className="px-3 py-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer shadow-2xs"
+                        >
+                          儲存
+                        </button>
+                      </div>
                     </div>
-                    <p className="text-slate-600 break-words leading-relaxed">{c.content}</p>
-                  </div>
+                  ) : (
+                    <div key={c.id} className="bg-slate-50/90 p-3 rounded-2xl border border-slate-100 group/comment">
+                      <div className="flex justify-between items-center mb-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-bold text-slate-800">{c.member_name}</span>
+                          {c.member_name === currentMember && (
+                            <span className="text-[10px] text-blue-600 font-bold bg-blue-50 px-1.5 py-0.2 rounded-md">
+                              你
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <span className="text-[10px] text-slate-400 mr-1">
+                            {new Date(c.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingCommentId(c.id);
+                              setEditingCommentText(c.content);
+                            }}
+                            className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                            title="修改留言"
+                          >
+                            <Pencil className="w-3 h-3" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (onDeleteComment) onDeleteComment(spot.id, c.id);
+                            }}
+                            className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                            title="刪除留言"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                      <p className="text-slate-600 break-words leading-relaxed">{c.content}</p>
+                    </div>
+                  )
                 ))
               ) : (
                 <div className="text-center py-4 text-slate-400 bg-slate-50/50 rounded-2xl">

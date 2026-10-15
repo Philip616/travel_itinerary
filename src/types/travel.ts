@@ -59,6 +59,14 @@ export interface SpotItem {
   comments?: SpotComment[];
 }
 
+export interface AccommodationComment {
+  id: string;
+  accommodation_id: string;
+  member_name: string;
+  content: string;
+  created_at: string;
+}
+
 export interface Accommodation {
   id: string;
   trip_id: string;
@@ -71,6 +79,7 @@ export interface Accommodation {
   phone?: string;
   note?: string;
   created_at: string;
+  comments?: AccommodationComment[];
 }
 
 export interface Flight {
