@@ -13,5 +13,5 @@ export default defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
-  envPrefix: ['VITE_', 'NEXT_PUBLIC_'],
+  envPrefix: ['NEXT_PUBLIC_', 'VITE_'],
 });
