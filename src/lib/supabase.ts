@@ -10,7 +10,7 @@ import {
   SpotVote,
   SpotComment
 } from '@/types/travel';
-import { getLocalTripCache, setLocalTripCache } from './storage';
+import { getLocalTripCache, setLocalTripCache, removeLocalTripCache } from './storage';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
@@ -159,6 +159,40 @@ export async function fetchFullTrip(slug: string): Promise<FullTripData | null> 
       spotsWithExtras = (spots || []) as SpotItem[];
     }
 
+    const accIds = (accsRes.data || []).map((a: any) => a.id);
+    let accsWithComments: Accommodation[] = [];
+
+    if (accIds.length > 0) {
+      try {
+        const { data: comments, error: commentErr } = await supabase
+          .from('accommodation_comments')
+          .select('*')
+          .in('accommodation_id', accIds)
+          .order('created_at', { ascending: true });
+
+        if (!commentErr && comments) {
+          accsWithComments = (accsRes.data || []).map((acc: any) => ({
+            ...acc,
+            comments: comments.filter((c: any) => c.accommodation_id === acc.id)
+          }));
+        } else {
+          const localAccMap = new Map((localCache?.accommodations || []).map(a => [a.id, a.comments || []]));
+          accsWithComments = (accsRes.data || []).map((acc: any) => ({
+            ...acc,
+            comments: localAccMap.get(acc.id) || []
+          }));
+        }
+      } catch {
+        const localAccMap = new Map((localCache?.accommodations || []).map(a => [a.id, a.comments || []]));
+        accsWithComments = (accsRes.data || []).map((acc: any) => ({
+          ...acc,
+          comments: localAccMap.get(acc.id) || []
+        }));
+      }
+    } else {
+      accsWithComments = [];
+    }
+
     const structuredDays = (daysRes.data || []).map((day: any) => ({
       ...day,
       spots: spotsWithExtras.filter(s => s.day_id === day.id)
@@ -169,7 +203,7 @@ export async function fetchFullTrip(slug: string): Promise<FullTripData | null> 
       members: membersRes.data || [],
       days: structuredDays,
       flights: flightsRes.data || [],
-      accommodations: accsRes.data || []
+      accommodations: accsWithComments
     };
 
     // 同步更新本地離線快取
@@ -186,3 +220,26 @@ export async function verifyTripPin(currentHash: string, inputPin: string): Prom
   const inputHash = await hashPin(inputPin);
   return inputHash === currentHash;
 }
+
+// 刪除整趟旅程 (同步清除本地快取與雲端資料)
+export async function deleteTrip(slug: string, tripId: string): Promise<{ success: boolean; error: string | null }> {
+  // 1. 立即清除本地快取，確保首頁與最近清單不再顯示
+  removeLocalTripCache(slug);
+
+  // 2. 若有 Supabase 則同步自雲端刪除
+  if (supabase) {
+    try {
+      const { error } = await supabase.from('trips').delete().eq('id', tripId);
+      if (error) {
+        console.warn('雲端刪除旅程失敗:', error);
+        return { success: false, error: error.message };
+      }
+    } catch (err: any) {
+      console.warn('雲端刪除旅程異常:', err);
+      return { success: false, error: err?.message || '雲端資料庫連線失敗' };
+    }
+  }
+
+  return { success: true, error: null };
+}
+

@@ -2,12 +2,13 @@
 
 import React, { useState } from 'react';
 import { Flight } from '@/types/travel';
-import { PlaneTakeoff, PlaneLanding, Plus, Trash2, Clock, MapPin, User, ArrowRight, Luggage, Building, Calendar } from 'lucide-react';
+import { PlaneTakeoff, PlaneLanding, Plus, Trash2, Clock, MapPin, User, ArrowRight, Luggage, Building, Calendar, Pencil } from 'lucide-react';
 
 interface FlightSectionProps {
   flights: Flight[];
   currentMember: string;
   onAddFlight: (flight: Partial<Flight>) => void;
+  onUpdateFlight: (flightId: string, flight: Partial<Flight>) => void;
   onDeleteFlight: (flightId: string) => void;
 }
 
@@ -15,9 +16,12 @@ export function FlightSection({
   flights,
   currentMember,
   onAddFlight,
+  onUpdateFlight,
   onDeleteFlight,
 }: FlightSectionProps) {
-  const [showAddModal, setShowAddModal] = useState(false);
+  const [showModal, setShowModal] = useState(false);
+  const [editingFlight, setEditingFlight] = useState<Flight | null>(null);
+
   const [flightType, setFlightType] = useState<'DEPARTURE' | 'RETURN'>('DEPARTURE');
   const [memberName, setMemberName] = useState(currentMember || '');
   const [flightNumber, setFlightNumber] = useState('');
@@ -31,22 +35,10 @@ export function FlightSection({
   const departureFlights = flights.filter((f) => f.flight_type === 'DEPARTURE');
   const returnFlights = flights.filter((f) => f.flight_type === 'RETURN');
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!memberName.trim()) return;
-
-    onAddFlight({
-      member_name: memberName.trim(),
-      flight_type: flightType,
-      flight_number: flightNumber.trim() || undefined,
-      departure_airport: depAirport.trim() || undefined,
-      arrival_airport: arrAirport.trim() || undefined,
-      departure_time: depTime ? new Date(depTime).toISOString() : undefined,
-      arrival_time: arrTime ? new Date(arrTime).toISOString() : undefined,
-      terminal: terminal.trim() || undefined,
-      note: note.trim() || undefined,
-    });
-
+  const openAddModal = () => {
+    setEditingFlight(null);
+    setFlightType('DEPARTURE');
+    setMemberName(currentMember || '');
     setFlightNumber('');
     setDepAirport('');
     setArrAirport('');
@@ -54,7 +46,55 @@ export function FlightSection({
     setArrTime('');
     setTerminal('');
     setNote('');
-    setShowAddModal(false);
+    setShowModal(true);
+  };
+
+  const openEditModal = (f: Flight) => {
+    setEditingFlight(f);
+    setFlightType(f.flight_type);
+    setMemberName(f.member_name || '');
+    setFlightNumber(f.flight_number || '');
+    setDepAirport(f.departure_airport || '');
+    setArrAirport(f.arrival_airport || '');
+    // 轉換為 local datetime-local 格式 (YYYY-MM-DDTHH:mm)
+    setDepTime(f.departure_time ? f.departure_time.slice(0, 16) : '');
+    setArrTime(f.arrival_time ? f.arrival_time.slice(0, 16) : '');
+    setTerminal(f.terminal || '');
+    setNote(f.note || '');
+    setShowModal(true);
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!memberName.trim()) return;
+
+    if (editingFlight) {
+      onUpdateFlight(editingFlight.id, {
+        member_name: memberName.trim(),
+        flight_type: flightType,
+        flight_number: flightNumber.trim() || undefined,
+        departure_airport: depAirport.trim() || undefined,
+        arrival_airport: arrAirport.trim() || undefined,
+        departure_time: depTime ? new Date(depTime).toISOString() : undefined,
+        arrival_time: arrTime ? new Date(arrTime).toISOString() : undefined,
+        terminal: terminal.trim() || undefined,
+        note: note.trim() || undefined,
+      });
+    } else {
+      onAddFlight({
+        member_name: memberName.trim(),
+        flight_type: flightType,
+        flight_number: flightNumber.trim() || undefined,
+        departure_airport: depAirport.trim() || undefined,
+        arrival_airport: arrAirport.trim() || undefined,
+        departure_time: depTime ? new Date(depTime).toISOString() : undefined,
+        arrival_time: arrTime ? new Date(arrTime).toISOString() : undefined,
+        terminal: terminal.trim() || undefined,
+        note: note.trim() || undefined,
+      });
+    }
+
+    setShowModal(false);
   };
 
   const renderFlightTicket = (f: Flight) => {
@@ -100,13 +140,22 @@ export function FlightSection({
               </div>
             </div>
 
-            <button
-              onClick={() => onDeleteFlight(f.id)}
-              className="text-slate-300 hover:text-rose-500 p-1.5 rounded-xl transition-colors hover:bg-rose-50 cursor-pointer"
-              title="刪除航班記錄"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => openEditModal(f)}
+                className="text-slate-300 hover:text-blue-600 p-1.5 rounded-xl transition-colors hover:bg-blue-50 cursor-pointer"
+                title="編輯航班"
+              >
+                <Pencil className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => onDeleteFlight(f.id)}
+                className="text-slate-300 hover:text-rose-500 p-1.5 rounded-xl transition-colors hover:bg-rose-50 cursor-pointer"
+                title="刪除航班記錄"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
           </div>
 
           {/* 機票主體：出發地 ➔ 目的地 航線圖 */}
@@ -196,10 +245,7 @@ export function FlightSection({
         </div>
 
         <button
-          onClick={() => {
-            setMemberName(currentMember || '');
-            setShowAddModal(true);
-          }}
+          onClick={openAddModal}
           className="inline-flex items-center justify-center gap-2 px-5 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-2xl text-xs font-black shadow-md shadow-blue-500/25 active:scale-95 transition-all cursor-pointer shrink-0"
         >
           <Plus className="w-4 h-4" />
@@ -256,11 +302,13 @@ export function FlightSection({
         </div>
       </div>
 
-      {/* 登記機票彈窗 */}
-      {showAddModal && (
+      {/* 登記/編輯機票彈窗 */}
+      {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-4">
           <div className="w-full max-w-md bg-white rounded-3xl p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
-            <h3 className="text-lg font-black text-slate-900 mb-4 tracking-tight">登記個人航班行程</h3>
+            <h3 className="text-lg font-black text-slate-900 mb-4 tracking-tight">
+              {editingFlight ? '編輯個人航班資訊' : '登記個人航班行程'}
+            </h3>
             
             <form onSubmit={handleSubmit} className="space-y-4 text-xs">
               <div>
@@ -372,7 +420,7 @@ export function FlightSection({
               <div className="flex gap-2.5 pt-3">
                 <button
                   type="button"
-                  onClick={() => setShowAddModal(false)}
+                  onClick={() => setShowModal(false)}
                   className="flex-1 py-3 border border-slate-200 rounded-2xl font-bold text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer"
                 >
                   取消
@@ -381,7 +429,7 @@ export function FlightSection({
                   type="submit"
                   className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-bold shadow-md shadow-blue-500/25 transition-all cursor-pointer"
                 >
-                  確認儲存
+                  {editingFlight ? '儲存修改' : '確認儲存'}
                 </button>
               </div>
             </form>

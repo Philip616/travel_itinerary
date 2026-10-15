@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { CategoryType, SpotItem } from '@/types/travel';
-import { X, Plus, MapPin, Camera, Utensils, ShoppingBag, Bus, Sparkles, DollarSign, Clock } from 'lucide-react';
+import { X, Plus, MapPin, Camera, Utensils, ShoppingBag, Bus, Sparkles, DollarSign, Clock, Pencil } from 'lucide-react';
 import { getGoogleMapsSearchUrl } from '@/lib/maps';
 
 interface AddSpotModalProps {
@@ -10,7 +10,9 @@ interface AddSpotModalProps {
   onClose: () => void;
   dayId: string;
   currentMember: string;
-  onAddSpot: (spot: Partial<SpotItem>) => void;
+  initialSpot?: SpotItem | null;
+  onAddSpot?: (spot: Partial<SpotItem>) => void;
+  onUpdateSpot?: (spotId: string, spot: Partial<SpotItem>) => void;
 }
 
 export function AddSpotModal({
@@ -18,13 +20,33 @@ export function AddSpotModal({
   onClose,
   dayId,
   currentMember,
+  initialSpot,
   onAddSpot,
+  onUpdateSpot,
 }: AddSpotModalProps) {
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState<CategoryType>('ATTRACTION');
   const [timeSlot, setTimeSlot] = useState('');
   const [address, setAddress] = useState('');
   const [costEstimate, setCostEstimate] = useState('');
+
+  const isEditMode = !!initialSpot;
+
+  useEffect(() => {
+    if (initialSpot) {
+      setTitle(initialSpot.title || '');
+      setCategory(initialSpot.category || 'ATTRACTION');
+      setTimeSlot(initialSpot.time_slot || '');
+      setAddress(initialSpot.address || '');
+      setCostEstimate(initialSpot.cost_estimate || '');
+    } else {
+      setTitle('');
+      setCategory('ATTRACTION');
+      setTimeSlot('');
+      setAddress('');
+      setCostEstimate('');
+    }
+  }, [initialSpot, isOpen]);
 
   if (!isOpen) return null;
 
@@ -34,23 +56,30 @@ export function AddSpotModal({
 
     const mapsUrl = getGoogleMapsSearchUrl(`${title.trim()} ${address.trim()}`);
 
-    onAddSpot({
-      day_id: dayId,
-      title: title.trim(),
-      category,
-      time_slot: timeSlot.trim() || undefined,
-      address: address.trim() || undefined,
-      google_map_url: mapsUrl,
-      cost_estimate: costEstimate.trim() || undefined,
-      created_by: currentMember || '匿名旅伴',
-      votes: [],
-      comments: []
-    });
+    if (isEditMode && initialSpot && onUpdateSpot) {
+      onUpdateSpot(initialSpot.id, {
+        title: title.trim(),
+        category,
+        time_slot: timeSlot.trim() || undefined,
+        address: address.trim() || undefined,
+        google_map_url: mapsUrl,
+        cost_estimate: costEstimate.trim() || undefined,
+      });
+    } else if (onAddSpot) {
+      onAddSpot({
+        day_id: dayId,
+        title: title.trim(),
+        category,
+        time_slot: timeSlot.trim() || undefined,
+        address: address.trim() || undefined,
+        google_map_url: mapsUrl,
+        cost_estimate: costEstimate.trim() || undefined,
+        created_by: currentMember || '匿名旅伴',
+        votes: [],
+        comments: [],
+      });
+    }
 
-    setTitle('');
-    setTimeSlot('');
-    setAddress('');
-    setCostEstimate('');
     onClose();
   };
 
@@ -67,12 +96,18 @@ export function AddSpotModal({
       <div className="w-full max-w-md bg-white rounded-3xl p-6 shadow-2xl animate-in zoom-in-95 duration-200 max-h-[92vh] overflow-y-auto">
         <div className="flex justify-between items-center mb-5">
           <div className="flex items-center gap-2.5">
-            <span className="w-9 h-9 rounded-2xl bg-blue-100 text-blue-600 flex items-center justify-center font-bold">
-              <Plus className="w-5 h-5 stroke-[2.5]" />
+            <span className={`w-9 h-9 rounded-2xl flex items-center justify-center font-bold ${
+              isEditMode ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-600'
+            }`}>
+              {isEditMode ? <Pencil className="w-5 h-5" /> : <Plus className="w-5 h-5 stroke-[2.5]" />}
             </span>
             <div>
-              <h3 className="text-lg font-black text-slate-900 tracking-tight">新增行程地點</h3>
-              <p className="text-[11px] text-slate-400">安排當日動線、時段與預估預算</p>
+              <h3 className="text-lg font-black text-slate-900 tracking-tight">
+                {isEditMode ? '修改行程地點資訊' : '新增行程地點'}
+              </h3>
+              <p className="text-[11px] text-slate-400">
+                {isEditMode ? '更新景點名稱、類別、時間或預算' : '安排當日動線、時段與預估預算'}
+              </p>
             </div>
           </div>
           <button
@@ -190,7 +225,7 @@ export function AddSpotModal({
               type="submit"
               className="flex-1 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-2xl font-bold shadow-md shadow-blue-500/25 transition-all cursor-pointer"
             >
-              加入本日行程
+              {isEditMode ? '儲存修改' : '加入本日行程'}
             </button>
           </div>
         </form>

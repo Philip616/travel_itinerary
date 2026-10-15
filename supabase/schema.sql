@@ -97,12 +97,22 @@ create table if not exists public.spot_comments (
     created_at timestamptz default now() not null
 );
 
+-- 9. Accommodation Comments 表 (住宿候選與心得討論留言)
+create table if not exists public.accommodation_comments (
+    id uuid default gen_random_uuid() primary key,
+    accommodation_id uuid references public.accommodations(id) on delete cascade not null,
+    member_name text not null,
+    content text not null,
+    created_at timestamptz default now() not null
+);
+
 -- 建立索引以確保即時查詢效能
 create index if not exists idx_trips_slug on public.trips(slug);
 create index if not exists idx_itinerary_days_trip on public.itinerary_days(trip_id, day_number);
 create index if not exists idx_spot_items_day on public.spot_items(day_id, sort_order);
 create index if not exists idx_flights_trip on public.flights(trip_id);
 create index if not exists idx_accommodations_trip on public.accommodations(trip_id);
+create index if not exists idx_accommodation_comments_acc on public.accommodation_comments(accommodation_id);
 
 -- 啟用 Row Level Security (RLS) 並允許房間成員公開讀寫
 alter table public.trips enable row level security;
@@ -113,6 +123,7 @@ alter table public.flights enable row level security;
 alter table public.spot_items enable row level security;
 alter table public.spot_votes enable row level security;
 alter table public.spot_comments enable row level security;
+alter table public.accommodation_comments enable row level security;
 
 -- 免帳號房間連結協同的 RLS 政策 (開放讀取與寫入)
 create policy "Allow public read access" on public.trips for select using (true);
@@ -127,6 +138,7 @@ create policy "Allow public all access on flights" on public.flights for all usi
 create policy "Allow public all access on spots" on public.spot_items for all using (true) with check (true);
 create policy "Allow public all access on votes" on public.spot_votes for all using (true) with check (true);
 create policy "Allow public all access on comments" on public.spot_comments for all using (true) with check (true);
+create policy "Allow public all access on accommodation_comments" on public.accommodation_comments for all using (true) with check (true);
 
 -- 啟用 Supabase Realtime 即時廣播
 alter publication supabase_realtime add table public.itinerary_days;
@@ -135,3 +147,4 @@ alter publication supabase_realtime add table public.spot_votes;
 alter publication supabase_realtime add table public.spot_comments;
 alter publication supabase_realtime add table public.flights;
 alter publication supabase_realtime add table public.accommodations;
+alter publication supabase_realtime add table public.accommodation_comments;

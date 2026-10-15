@@ -44,3 +44,12 @@ export function setLocalTripCache(slug: string, data: FullTripData): void {
     console.error('Failed to save trip to local cache:', err);
   }
 }
+
+export function removeLocalTripCache(slug: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem(`${TRIP_CACHE_PREFIX}${slug}`);
+  } catch (err) {
+    console.error('Failed to remove trip from local cache:', err);
+  }
+}
