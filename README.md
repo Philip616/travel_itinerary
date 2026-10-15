@@ -34,12 +34,12 @@
 
 ## 🛠 技術堆疊
 
-- **前端框架**：Next.js 14+ (App Router, React 19)
-- **樣式設計**：Tailwind CSS v4 (Mobile-First 響應式佈局)
+- **前端框架與打包**：Vite + React 19 (SPA, React Router v7)
+- **樣式設計**：Tailwind CSS v4 (原生 `@tailwindcss/vite` 插件)
 - **圖示庫**：Lucide React
 - **資料庫與即時同步**：Supabase (PostgreSQL + Realtime WebSocket)
-- **離線與快取**：PWA Web Manifest + 本地 LocalStorage / IndexedDB 快取
-- **代管部署**：Vercel + GitHub
+- **離線與快取**：PWA Web Manifest + 本地 LocalStorage 快取
+- **代管部署**：Vercel / Cloudflare Pages / GitHub Pages 等靜態託管平台
 
 ---
 
@@ -83,7 +83,7 @@ supabase/schema.sql
 npm run dev
 ```
 
-在手機或瀏覽器開啟 `http://localhost:3000` 即可預覽。
+在手機或瀏覽器開啟 `http://localhost:5173` 即可預覽。
 
 ---
 

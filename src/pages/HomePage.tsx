@@ -1,7 +1,7 @@
-'use client';
+
 
 import React, { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useNavigate } from 'react-router-dom';
 import { createNewTrip } from '@/lib/supabase';
 import { 
   Plus, 
@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 
 export default function HomePage() {
-  const router = useRouter();
+  const navigate = useNavigate();
 
   const [title, setTitle] = useState('');
   const [startDate, setStartDate] = useState('');
@@ -81,7 +81,7 @@ export default function HomePage() {
     const { trip, error } = await createNewTrip(title.trim(), startDate, endDate, pin);
 
     if (trip) {
-      router.push(`/trip/${trip.slug}`);
+      navigate(`/trip/${trip.slug}`);
     } else {
       alert('建立旅程失敗：' + (error || '未知錯誤'));
       setLoading(false);
@@ -96,7 +96,7 @@ export default function HomePage() {
     if (cleanSlug.includes('/trip/')) {
       cleanSlug = cleanSlug.split('/trip/')[1].split('?')[0].split('/')[0];
     }
-    router.push(`/trip/${cleanSlug}`);
+    navigate(`/trip/${cleanSlug}`);
   };
 
   return (
@@ -280,7 +280,7 @@ export default function HomePage() {
                   {recentTrips.map((item) => (
                     <button
                       key={item.slug}
-                      onClick={() => router.push(`/trip/${item.slug}`)}
+                      onClick={() => navigate(`/trip/${item.slug}`)}
                       className="w-full bg-slate-50 hover:bg-blue-50/70 p-4 rounded-2xl border border-slate-200/80 hover:border-blue-400 flex items-center justify-between transition-all text-left group cursor-pointer"
                     >
                       <div className="min-w-0 pr-3">
