@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { createNewTrip } from '@/lib/supabase';
+import { createNewTrip, isSupabaseConfigured } from '@/lib/supabase';
 import { 
   Plus, 
   ArrowRight, 
@@ -78,9 +78,12 @@ export default function HomePage() {
     if (!title.trim() || !startDate || !endDate || pin.length < 4) return;
 
     setLoading(true);
-    const { trip, error } = await createNewTrip(title.trim(), startDate, endDate, pin);
+    const { trip, error, isOfflineOnly } = await createNewTrip(title.trim(), startDate, endDate, pin);
 
     if (trip) {
+      if (isOfflineOnly) {
+        alert('【重要提醒】目前專案尚未配置 Supabase 雲端資料庫（.env.local 為 placeholder 金鑰）。此房間僅儲存於您當前瀏覽器中，其他裝置或好友無法透過代碼存取！若需多人連線同步，請先配置資料庫金鑰。');
+      }
       navigate(`/trip/${trip.slug}`);
     } else {
       alert('建立旅程失敗：' + (error || '未知錯誤'));
@@ -112,9 +115,22 @@ export default function HomePage() {
             <Compass className="w-9 h-9 text-white" />
           </div>
 
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/15 text-blue-100 text-xs font-bold mb-4 backdrop-blur-md border border-white/20 shadow-xs">
-            <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-            <span>2026 好友出遊即時協同規劃利器</span>
+          <div className="flex items-center gap-2 mb-4 flex-wrap justify-center">
+            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/15 text-blue-100 text-xs font-bold backdrop-blur-md border border-white/20 shadow-xs">
+              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+              <span>2026 好友出遊即時協同規劃利器</span>
+            </div>
+            {isSupabaseConfigured ? (
+              <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/25 text-emerald-200 text-xs font-bold backdrop-blur-md border border-emerald-400/30">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span>雲端資料庫：已連線</span>
+              </div>
+            ) : (
+              <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-500/25 text-amber-200 text-xs font-bold backdrop-blur-md border border-amber-400/30">
+                <span className="w-2 h-2 rounded-full bg-amber-400" />
+                <span>雲端資料庫：未連線 (離線單機模式)</span>
+              </div>
+            )}
           </div>
 
           <h1 className="text-3xl sm:text-5xl md:text-6xl font-black tracking-tight mb-4 drop-shadow-xs">
