@@ -1,7 +1,6 @@
-'use client';
-
 import React, { useState } from 'react';
 import { Share2, Copy, Check, X, Smartphone, QrCode } from 'lucide-react';
+import { isSupabaseConfigured } from '@/lib/supabase';
 
 interface ShareModalProps {
   isOpen: boolean;
@@ -61,9 +60,20 @@ export function ShareModal({ isOpen, onClose, tripTitle, slug }: ShareModalProps
         </div>
 
         <h3 className="text-xl font-black text-slate-900 tracking-tight">邀請好友共同編輯</h3>
-        <p className="text-xs text-slate-500 mt-1 mb-5 leading-relaxed">
+        <p className="text-xs text-slate-500 mt-1 mb-4 leading-relaxed">
           將專屬房間短網址分享到 LINE 群組，好友免註冊點開即可共同編排景點、按讚與登記機票！
         </p>
+
+        {!isSupabaseConfigured && (
+          <div className="bg-amber-50 border border-amber-200/90 rounded-2xl p-3 mb-4 text-left">
+            <p className="text-xs font-bold text-amber-900 mb-1">
+              ⚠️ 雲端資料庫未配置（單機離線模式）
+            </p>
+            <p className="text-[11px] text-amber-700 leading-relaxed">
+              此房間目前僅存在於您當前這台裝置的瀏覽器快取中。若傳給好友，對方的裝置將無法查詢到此房間。請先在專案環境變數設定 Supabase 連線資訊。
+            </p>
+          </div>
+        )}
 
         {/* 連結預覽與複製卡片 */}
         <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200/90 flex items-center justify-between gap-2 mb-4">

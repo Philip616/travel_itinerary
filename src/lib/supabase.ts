@@ -46,7 +46,7 @@ export async function createNewTrip(
   startDate: string,
   endDate: string,
   pin: string
-): Promise<{ trip: Trip | null; error: string | null }> {
+): Promise<{ trip: Trip | null; error: string | null; isOfflineOnly?: boolean }> {
   const slug = generateSlug(title);
   const pin_hash = await hashPin(pin);
   const tripId = 'trip_' + Math.random().toString(36).substring(2, 11);
@@ -90,9 +90,6 @@ export async function createNewTrip(
     flights: []
   };
 
-  // 本地快取立即寫入 (離線支援)
-  setLocalTripCache(slug, initialFullData);
-
   // 若已配置 Supabase 則同步至雲端
   if (supabase) {
     try {
@@ -111,14 +108,37 @@ export async function createNewTrip(
         theme: d.theme
       }));
 
-      await supabase.from('itinerary_days').insert(daysToInsert);
-      return { trip: tripData, error: null };
+      const { data: insertedDays, error: daysErr } = await supabase
+        .from('itinerary_days')
+        .insert(daysToInsert)
+        .select();
+
+      if (daysErr) throw daysErr;
+
+      // 使用雲端產生的實際 ID 更新本地快取
+      const syncedDays = (insertedDays || []).map((d: any) => ({
+        ...d,
+        spots: []
+      }));
+
+      setLocalTripCache(slug, {
+        trip: tripData,
+        members: [],
+        days: syncedDays,
+        accommodations: [],
+        flights: []
+      });
+
+      return { trip: tripData, error: null, isOfflineOnly: false };
     } catch (err: any) {
-      console.warn('Supabase 同步失敗，轉為本地離線模式:', err.message);
+      console.error('Supabase 雲端資料庫寫入失敗:', err);
+      return { trip: null, error: `雲端資料庫寫入失敗 (${err?.message || '連線逾時'})。旅程未能保存至資料庫，請確認 Supabase 資料表已建立。` };
     }
   }
 
-  return { trip: newTrip, error: null };
+  // 未配置雲端資料庫（離線單機模式）
+  setLocalTripCache(slug, initialFullData);
+  return { trip: newTrip, error: null, isOfflineOnly: true };
 }
 
 // 取得完整旅程資料 (優先從雲端讀取，離線或未配置時從本地快取讀取)
