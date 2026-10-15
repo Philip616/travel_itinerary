@@ -1,7 +1,7 @@
-'use client';
 
-import React, { useEffect, useState, use } from 'react';
-import { useRouter } from 'next/navigation';
+
+import React, { useEffect, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { 
   FullTripData, 
   SpotItem, 
@@ -51,33 +51,15 @@ import {
   Layers
 } from 'lucide-react';
 
-export const dynamic = 'force-dynamic';
 
-interface PageProps {
-  params: Promise<{ slug: string }>;
+
+export default function TripDetailPage() {
+  const { slug = '' } = useParams<{ slug: string }>();
+  return <TripDetailInner slug={slug} />;
 }
 
-export default function TripDetailPage({ params }: PageProps) {
-  return (
-    <React.Suspense
-      fallback={
-        <div className="min-h-screen flex items-center justify-center bg-slate-50">
-          <div className="flex flex-col items-center gap-3">
-            <div className="w-10 h-10 border-3 border-blue-600 border-t-transparent rounded-full animate-spin" />
-            <p className="text-xs text-slate-500 font-semibold tracking-wider">載入行程中...</p>
-          </div>
-        </div>
-      }
-    >
-      <TripDetailInner params={params} />
-    </React.Suspense>
-  );
-}
-
-function TripDetailInner({ params }: PageProps) {
-  const resolvedParams = use(params);
-  const slug = resolvedParams.slug;
-  const router = useRouter();
+function TripDetailInner({ slug }: { slug: string }) {
+  const navigate = useNavigate();
 
   const [fullData, setFullData] = useState<FullTripData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -716,7 +698,7 @@ function TripDetailInner({ params }: PageProps) {
         if (!res.success) {
           throw new Error(res.error || '刪除旅程失敗，請確認資料庫狀態');
         }
-        router.push('/');
+        navigate('/');
       },
     });
     setShowAdminPinModal(true);
@@ -739,7 +721,7 @@ function TripDetailInner({ params }: PageProps) {
         <h2 className="text-xl font-black text-slate-900 mb-2">找不到此旅程房間</h2>
         <p className="text-xs text-slate-500 mb-6">請確認分享連結代碼是否正確，或此旅程已結束</p>
         <button
-          onClick={() => router.push('/')}
+          onClick={() => navigate('/')}
           className="px-6 py-3 bg-blue-600 text-white rounded-2xl text-xs font-bold shadow-md hover:bg-blue-700 transition-all cursor-pointer"
         >
           返回首頁
@@ -802,7 +784,7 @@ function TripDetailInner({ params }: PageProps) {
               {/* 頂部微標籤組 */}
               <div className="flex items-center gap-2 flex-wrap">
                 <button
-                  onClick={() => router.push('/')}
+                  onClick={() => navigate('/')}
                   className="inline-flex items-center gap-1.5 text-xs font-bold text-white/90 hover:text-white bg-white/15 hover:bg-white/25 backdrop-blur-md px-3 py-1.5 rounded-xl transition-all cursor-pointer shadow-2xs"
                 >
                   <ArrowLeft className="w-3.5 h-3.5" />
