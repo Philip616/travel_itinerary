@@ -196,6 +196,134 @@ function TripDetailInner({ slug }: { slug: string }) {
     setLocalTripCache(slug, newData);
   };
 
+  // 彙整房間所有協同成員與參與動態統計 (必須在所有條件返回前執行以符合 Hook 規範)
+  const activeMembers = useMemo(() => {
+    if (!fullData) return [];
+    const map = new Map<string, {
+      member: TripMember;
+      isCurrent: boolean;
+      flightsCount: number;
+      spotsCount: number;
+      commentsCount: number;
+    }>();
+
+    const currentDeviceId = getDeviceId();
+    const normalizedCurrentName = currentMember.trim().toLowerCase();
+
+    // 1. 登記於 trip_members 中的成員
+    fullData.members.forEach((m) => {
+      if (!m.nickname) return;
+      const key = m.nickname.trim().toLowerCase();
+      map.set(key, {
+        member: m,
+        isCurrent: key === normalizedCurrentName || (!!m.device_id && m.device_id === currentDeviceId),
+        flightsCount: 0,
+        spotsCount: 0,
+        commentsCount: 0,
+      });
+    });
+
+    // 2. 當前使用者 (如果已設定暱稱但尚未在 members 中)
+    if (currentMember.trim()) {
+      const key = currentMember.trim().toLowerCase();
+      if (!map.has(key)) {
+        map.set(key, {
+          member: {
+            id: 'local_current',
+            trip_id: fullData.trip.id,
+            nickname: currentMember.trim(),
+            device_id: currentDeviceId,
+            created_at: new Date().toISOString()
+          },
+          isCurrent: true,
+          flightsCount: 0,
+          spotsCount: 0,
+          commentsCount: 0,
+        });
+      } else {
+        const item = map.get(key)!;
+        item.isCurrent = true;
+      }
+    }
+
+    // 3. 掃描航班統計與未知成員
+    fullData.flights.forEach((f) => {
+      if (!f.member_name) return;
+      const key = f.member_name.trim().toLowerCase();
+      if (!map.has(key)) {
+        map.set(key, {
+          member: {
+            id: `flight_${f.id}`,
+            trip_id: fullData.trip.id,
+            nickname: f.member_name.trim(),
+            device_id: '',
+            created_at: f.created_at || fullData.trip.created_at
+          },
+          isCurrent: key === normalizedCurrentName,
+          flightsCount: 1,
+          spotsCount: 0,
+          commentsCount: 0,
+        });
+      } else {
+        map.get(key)!.flightsCount += 1;
+      }
+    });
+
+    // 4. 掃描景點建立與留言統計
+    fullData.days.forEach((day) => {
+      day.spots.forEach((spot) => {
+        if (spot.created_by) {
+          const key = spot.created_by.trim().toLowerCase();
+          if (!map.has(key)) {
+            map.set(key, {
+              member: {
+                id: `spot_${spot.id}`,
+                trip_id: fullData.trip.id,
+                nickname: spot.created_by.trim(),
+                device_id: '',
+                created_at: spot.created_at || fullData.trip.created_at
+              },
+              isCurrent: key === normalizedCurrentName,
+              flightsCount: 0,
+              spotsCount: 1,
+              commentsCount: 0,
+            });
+          } else {
+            map.get(key)!.spotsCount += 1;
+          }
+        }
+
+        spot.comments?.forEach((c) => {
+          if (c.member_name) {
+            const key = c.member_name.trim().toLowerCase();
+            if (map.has(key)) {
+              map.get(key)!.commentsCount += 1;
+            }
+          }
+        });
+      });
+    });
+
+    // 住宿留言統計
+    fullData.accommodations.forEach((acc) => {
+      acc.comments?.forEach((c) => {
+        if (c.member_name) {
+          const key = c.member_name.trim().toLowerCase();
+          if (map.has(key)) {
+            map.get(key)!.commentsCount += 1;
+          }
+        }
+      });
+    });
+
+    // 排序：當前使用者置頂，其餘按加入或參與時間排序
+    return Array.from(map.values()).sort((a, b) => {
+      if (a.isCurrent && !b.isCurrent) return -1;
+      if (!a.isCurrent && b.isCurrent) return 1;
+      return new Date(a.member.created_at).getTime() - new Date(b.member.created_at).getTime();
+    });
+  }, [fullData, currentMember]);
+
   // 1. 景點投票
   const handleVote = async (spotId: string) => {
     if (!fullData) return;
@@ -787,134 +915,6 @@ function TripDetailInner({ slug }: { slug: string }) {
     : '當日景點分佈';
 
   const totalSpotsInTrip = fullData.days.reduce((acc, d) => acc + (d.spots?.length || 0), 0);
-
-  // 彙整房間所有協同成員與參與動態統計
-  const activeMembers = useMemo(() => {
-    if (!fullData) return [];
-    const map = new Map<string, {
-      member: TripMember;
-      isCurrent: boolean;
-      flightsCount: number;
-      spotsCount: number;
-      commentsCount: number;
-    }>();
-
-    const currentDeviceId = getDeviceId();
-    const normalizedCurrentName = currentMember.trim().toLowerCase();
-
-    // 1. 登記於 trip_members 中的成員
-    fullData.members.forEach((m) => {
-      if (!m.nickname) return;
-      const key = m.nickname.trim().toLowerCase();
-      map.set(key, {
-        member: m,
-        isCurrent: key === normalizedCurrentName || (!!m.device_id && m.device_id === currentDeviceId),
-        flightsCount: 0,
-        spotsCount: 0,
-        commentsCount: 0,
-      });
-    });
-
-    // 2. 當前使用者 (如果已設定暱稱但尚未在 members 中)
-    if (currentMember.trim()) {
-      const key = currentMember.trim().toLowerCase();
-      if (!map.has(key)) {
-        map.set(key, {
-          member: {
-            id: 'local_current',
-            trip_id: fullData.trip.id,
-            nickname: currentMember.trim(),
-            device_id: currentDeviceId,
-            created_at: new Date().toISOString()
-          },
-          isCurrent: true,
-          flightsCount: 0,
-          spotsCount: 0,
-          commentsCount: 0,
-        });
-      } else {
-        const item = map.get(key)!;
-        item.isCurrent = true;
-      }
-    }
-
-    // 3. 掃描航班統計與未知成員
-    fullData.flights.forEach((f) => {
-      if (!f.member_name) return;
-      const key = f.member_name.trim().toLowerCase();
-      if (!map.has(key)) {
-        map.set(key, {
-          member: {
-            id: `flight_${f.id}`,
-            trip_id: fullData.trip.id,
-            nickname: f.member_name.trim(),
-            device_id: '',
-            created_at: f.created_at || fullData.trip.created_at
-          },
-          isCurrent: key === normalizedCurrentName,
-          flightsCount: 1,
-          spotsCount: 0,
-          commentsCount: 0,
-        });
-      } else {
-        map.get(key)!.flightsCount += 1;
-      }
-    });
-
-    // 4. 掃描景點建立與留言統計
-    fullData.days.forEach((day) => {
-      day.spots.forEach((spot) => {
-        if (spot.created_by) {
-          const key = spot.created_by.trim().toLowerCase();
-          if (!map.has(key)) {
-            map.set(key, {
-              member: {
-                id: `spot_${spot.id}`,
-                trip_id: fullData.trip.id,
-                nickname: spot.created_by.trim(),
-                device_id: '',
-                created_at: spot.created_at || fullData.trip.created_at
-              },
-              isCurrent: key === normalizedCurrentName,
-              flightsCount: 0,
-              spotsCount: 1,
-              commentsCount: 0,
-            });
-          } else {
-            map.get(key)!.spotsCount += 1;
-          }
-        }
-
-        spot.comments?.forEach((c) => {
-          if (c.member_name) {
-            const key = c.member_name.trim().toLowerCase();
-            if (map.has(key)) {
-              map.get(key)!.commentsCount += 1;
-            }
-          }
-        });
-      });
-    });
-
-    // 住宿留言統計
-    fullData.accommodations.forEach((acc) => {
-      acc.comments?.forEach((c) => {
-        if (c.member_name) {
-          const key = c.member_name.trim().toLowerCase();
-          if (map.has(key)) {
-            map.get(key)!.commentsCount += 1;
-          }
-        }
-      });
-    });
-
-    // 排序：當前使用者置頂，其餘按加入或參與時間排序
-    return Array.from(map.values()).sort((a, b) => {
-      if (a.isCurrent && !b.isCurrent) return -1;
-      if (!a.isCurrent && b.isCurrent) return 1;
-      return new Date(a.member.created_at).getTime() - new Date(b.member.created_at).getTime();
-    });
-  }, [fullData, currentMember]);
 
   const navTabs: { id: TabType; label: string; icon: any; count?: number }[] = [
     { id: 'itinerary', label: '每日行程', icon: Calendar, count: totalSpotsInTrip },
