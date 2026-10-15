@@ -15,7 +15,8 @@ import {
   Check, 
   Pencil, 
   MessageSquare, 
-  Send 
+  Send,
+  FileText
 } from 'lucide-react';
 import { getGoogleMapsSearchUrl } from '@/lib/maps';
 
@@ -23,6 +24,104 @@ function calculateNights(start: string, end: string) {
   if (!start || !end) return 0;
   const diffTime = Math.abs(new Date(end).getTime() - new Date(start).getTime());
   return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+}
+
+function getUrlLabel(urlStr: string) {
+  try {
+    const parsed = new URL(urlStr);
+    const host = parsed.hostname.toLowerCase();
+    if (host.includes('agoda.com')) {
+      const segments = parsed.pathname.split('/').filter(Boolean);
+      const candidate = segments.find(
+        (s) =>
+          !['zh-tw', 'zh-hk', 'zh-cn', 'en-us', 'en-gb', 'hotel', 'hotels', 'city', 'country'].includes(s.toLowerCase()) &&
+          !s.endsWith('.html')
+      );
+      if (candidate) {
+        return `Agoda: ${decodeURIComponent(candidate).replace(/[-_]/g, ' ')}`;
+      }
+      return 'Agoda 飯店連結';
+    }
+    if (host.includes('booking.com')) {
+      const segments = parsed.pathname.split('/').filter(Boolean);
+      const last = segments[segments.length - 1];
+      if (last) {
+        return `Booking: ${decodeURIComponent(last.replace('.html', '')).replace(/[-_]/g, ' ')}`;
+      }
+      return 'Booking.com 飯店連結';
+    }
+    if (host.includes('airbnb.')) {
+      return 'Airbnb 房源連結';
+    }
+    return `${parsed.hostname}${parsed.pathname !== '/' ? parsed.pathname.slice(0, 20) + (parsed.pathname.length > 20 ? '...' : '') : ''}`;
+  } catch {
+    return urlStr.length > 35 ? urlStr.slice(0, 32) + '...' : urlStr;
+  }
+}
+
+function cleanUrl(rawUrl: string): { url: string; trailing: string } {
+  const match = rawUrl.match(/^(.*?)([，。、！？)）\]}'":;,]+)$/);
+  if (match) {
+    return { url: match[1], trailing: match[2] };
+  }
+  return { url: rawUrl, trailing: '' };
+}
+
+function renderTextWithLinks(text: string) {
+  if (!text) return null;
+
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  const parts = text.split(urlRegex);
+
+  return (
+    <>
+      {parts.map((part, index) => {
+        if (part.startsWith('http://') || part.startsWith('https://')) {
+          const { url, trailing } = cleanUrl(part);
+          const label = getUrlLabel(url);
+          return (
+            <React.Fragment key={index}>
+              <a
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 mx-0.5 px-2 py-0.5 rounded-lg bg-blue-50/90 hover:bg-blue-100 text-blue-700 hover:text-blue-900 border border-blue-200/70 font-semibold transition-all break-all shadow-2xs group/link align-baseline cursor-pointer text-xs"
+                title={url}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <ExternalLink className="w-3 h-3 text-blue-500 group-hover/link:text-blue-700 shrink-0" />
+                <span className="truncate max-w-[220px] sm:max-w-xs">{label}</span>
+              </a>
+              {trailing}
+            </React.Fragment>
+          );
+        }
+        return <span key={index}>{part}</span>;
+      })}
+    </>
+  );
+}
+
+function findFirstBookingUrl(text?: string): { url: string; label: string } | null {
+  if (!text) return null;
+  const match = text.match(/(https?:\/\/[^\s]+)/);
+  if (!match) return null;
+  const { url } = cleanUrl(match[1]);
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname.includes('agoda.com')) {
+      return { url, label: 'Agoda 頁面' };
+    }
+    if (parsed.hostname.includes('booking.com')) {
+      return { url, label: 'Booking.com' };
+    }
+    if (parsed.hostname.includes('airbnb.')) {
+      return { url, label: 'Airbnb 房源' };
+    }
+    return { url, label: '參考網址' };
+  } catch {
+    return { url, label: '參考網址' };
+  }
 }
 
 interface AccommodationCardProps {
@@ -50,7 +149,10 @@ function AccommodationCard({
   const [editingCommentText, setEditingCommentText] = useState('');
   const [copied, setCopied] = useState(false);
 
-  const mapsUrl = acc.google_map_url || getGoogleMapsSearchUrl(`${acc.name} ${acc.address || ''}`);
+  const isAddressUrl = !!(acc.address && (acc.address.startsWith('http://') || acc.address.startsWith('https://')));
+  const mapsSearchQuery = isAddressUrl ? acc.name : `${acc.name} ${acc.address || ''}`;
+  const mapsUrl = acc.google_map_url || getGoogleMapsSearchUrl(mapsSearchQuery);
+  const bookingLink = findFirstBookingUrl(acc.note) || (isAddressUrl ? findFirstBookingUrl(acc.address) : null);
   const nights = calculateNights(acc.check_in, acc.check_out);
   const commentsCount = acc.comments?.length || 0;
 
@@ -68,15 +170,15 @@ function AccommodationCard({
   };
 
   return (
-    <div className="bg-white rounded-3xl p-6 border border-slate-200/90 shadow-sm hover:shadow-md transition-all duration-200 flex flex-col justify-between group">
-      <div>
-        <div className="flex justify-between items-start mb-4">
-          <div className="flex items-center gap-3.5">
+    <div className="bg-white rounded-3xl p-6 border border-slate-200/90 shadow-sm hover:shadow-md transition-all duration-200 flex flex-col justify-between group min-w-0 overflow-hidden">
+      <div className="min-w-0">
+        <div className="flex justify-between items-start mb-4 gap-2">
+          <div className="flex items-center gap-3.5 min-w-0">
             <span className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-bold shadow-md shadow-indigo-500/20 shrink-0">
               <Building2 className="w-6 h-6" />
             </span>
-            <div>
-              <h3 className="text-lg font-black text-slate-900 tracking-tight">{acc.name}</h3>
+            <div className="min-w-0">
+              <h3 className="text-lg font-black text-slate-900 tracking-tight truncate">{acc.name}</h3>
               <div className="flex items-center gap-2 text-xs text-slate-500 mt-1 flex-wrap">
                 <span className="inline-flex items-center gap-1.5 font-bold text-slate-700">
                   <Calendar className="w-3.5 h-3.5 text-blue-600" />
@@ -92,7 +194,7 @@ function AccommodationCard({
             </div>
           </div>
 
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 shrink-0">
             <button
               onClick={() => onEdit(acc)}
               className="text-slate-300 hover:text-blue-600 p-1.5 rounded-xl transition-colors hover:bg-blue-50 cursor-pointer"
@@ -111,9 +213,15 @@ function AccommodationCard({
         </div>
 
         {acc.address && (
-          <div className="bg-slate-50/90 p-3 rounded-2xl border border-slate-100 my-3 flex items-start gap-2">
-            <MapPin className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
-            <p className="text-xs text-slate-600 leading-relaxed font-medium">{acc.address}</p>
+          <div className="bg-slate-50/90 p-3 rounded-2xl border border-slate-100 my-3 flex items-start gap-2 min-w-0">
+            {isAddressUrl ? (
+              <ExternalLink className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
+            ) : (
+              <MapPin className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
+            )}
+            <div className="text-xs text-slate-600 leading-relaxed font-medium break-all [overflow-wrap:anywhere] min-w-0 flex-1">
+              {isAddressUrl ? renderTextWithLinks(acc.address) : acc.address}
+            </div>
           </div>
         )}
 
@@ -145,16 +253,21 @@ function AccommodationCard({
         </div>
 
         {acc.note && (
-          <div className="text-xs text-amber-900 bg-amber-50/80 border border-amber-200/70 p-3 rounded-2xl mt-2 leading-relaxed">
-            <span className="font-bold text-amber-800">入住備忘：</span>
-            {acc.note}
+          <div className="text-xs text-amber-900 bg-amber-50/80 border border-amber-200/70 p-3.5 rounded-2xl mt-2 leading-relaxed break-all [overflow-wrap:anywhere] whitespace-pre-wrap min-w-0">
+            <div className="font-bold text-amber-800 mb-1.5 flex items-center gap-1.5">
+              <FileText className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+              <span>入住備忘 / 候選參考：</span>
+            </div>
+            <div className="break-all [overflow-wrap:anywhere]">
+              {renderTextWithLinks(acc.note)}
+            </div>
           </div>
         )}
       </div>
 
       <div>
         {/* 底部功能與操作列 */}
-        <div className="pt-4 border-t border-slate-100 mt-4 flex items-center justify-between gap-2">
+        <div className="pt-4 border-t border-slate-100 mt-4 flex items-center justify-between gap-2 flex-wrap">
           {/* 留言討論切換按鈕 */}
           <button
             onClick={() => setShowComments(!showComments)}
@@ -180,17 +293,33 @@ function AccommodationCard({
             </span>
           </button>
 
-          {/* 地圖導航 */}
-          <a
-            href={mapsUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-600 bg-blue-50/80 hover:bg-blue-100 px-3.5 py-1.5 rounded-xl transition-all shadow-2xs"
-          >
-            <MapPin className="w-3.5 h-3.5 text-blue-600" />
-            <span>地圖導航</span>
-            <ExternalLink className="w-3 h-3 text-blue-400" />
-          </a>
+          <div className="flex items-center gap-2">
+            {/* 快速直達 Agoda / 訂房參考連結 */}
+            {bookingLink && (
+              <a
+                href={bookingLink.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-800 bg-amber-100/80 hover:bg-amber-200/80 border border-amber-300/80 px-3 py-1.5 rounded-xl transition-all shadow-2xs"
+                title={`前往 ${bookingLink.label} (${bookingLink.url})`}
+              >
+                <ExternalLink className="w-3.5 h-3.5 text-amber-700" />
+                <span>{bookingLink.label}</span>
+              </a>
+            )}
+
+            {/* 地圖導航 */}
+            <a
+              href={mapsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-600 bg-blue-50/80 hover:bg-blue-100 px-3.5 py-1.5 rounded-xl transition-all shadow-2xs"
+            >
+              <MapPin className="w-3.5 h-3.5 text-blue-600" />
+              <span>地圖導航</span>
+              <ExternalLink className="w-3 h-3 text-blue-400" />
+            </a>
+          </div>
         </div>
 
         {/* 留言討論收合抽屜 */}
@@ -276,7 +405,9 @@ function AccommodationCard({
                           </button>
                         </div>
                       </div>
-                      <p className="text-slate-600 break-words leading-relaxed">{c.content}</p>
+                      <div className="text-slate-600 text-xs break-all [overflow-wrap:anywhere] whitespace-pre-wrap leading-relaxed">
+                        {renderTextWithLinks(c.content)}
+                      </div>
                     </div>
                   )
                 ))
@@ -371,7 +502,8 @@ export function AccommodationSection({
     e.preventDefault();
     if (!name.trim() || !checkIn || !checkOut) return;
 
-    const mapsUrl = getGoogleMapsSearchUrl(`${name.trim()} ${address.trim()}`);
+    const isAddressUrl = address.trim().startsWith('http://') || address.trim().startsWith('https://');
+    const mapsUrl = getGoogleMapsSearchUrl(isAddressUrl ? name.trim() : `${name.trim()} ${address.trim()}`);
 
     if (editingAcc) {
       onUpdateAccommodation(editingAcc.id, {
@@ -491,13 +623,16 @@ export function AccommodationSection({
               </div>
 
               <div>
-                <label className="font-bold text-slate-700 block mb-1">飯店地址</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="font-bold text-slate-700">飯店地址 (選填)</label>
+                  <span className="text-[11px] text-slate-400 font-medium">尚未預訂或候選中可先留空</span>
+                </div>
                 <input
                   type="text"
-                  placeholder="例如：東京都渋谷区代々木2-3-1"
+                  placeholder="例如：東京都渋谷区代々木2-3-1 (尚未預訂可留空)"
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-2xl text-slate-900 font-medium"
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-2xl text-slate-900 font-medium text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
                 />
               </div>
 
@@ -525,13 +660,18 @@ export function AccommodationSection({
               </div>
 
               <div>
-                <label className="font-bold text-slate-700 block mb-1">備註資訊 (門禁、行李寄放等)</label>
-                <input
-                  type="text"
-                  placeholder="例如：下午兩點後可寄放行李、附免費早餐"
+                <div className="flex items-center justify-between mb-1">
+                  <label className="font-bold text-slate-700">
+                    備註與參考網址 (Agoda/訂房連結、門禁、行李寄放等)
+                  </label>
+                  <span className="text-[11px] text-slate-400 font-medium">支援多行與長網址</span>
+                </div>
+                <textarea
+                  rows={4}
+                  placeholder={`例如：\n1. 雙人房兩晚約 NT$6,000，附免費早餐\n2. 離新宿站走路 3 分鐘\n3. Agoda 參考網址：https://www.agoda.com/...`}
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-2xl text-slate-900 font-medium"
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-2xl text-slate-900 font-medium text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none resize-y leading-relaxed"
                 />
               </div>
 

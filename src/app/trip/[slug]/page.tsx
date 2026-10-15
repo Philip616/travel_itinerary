@@ -768,7 +768,7 @@ function TripDetailInner({ params }: PageProps) {
   const activeMapLocation = activeSpot
     ? `${activeSpot.title} ${activeSpot.address || ''}`
     : matchingAccommodation
-    ? `${matchingAccommodation.name} ${matchingAccommodation.address || ''}`
+    ? `${matchingAccommodation.name} ${matchingAccommodation.address && !matchingAccommodation.address.startsWith('http') ? matchingAccommodation.address : ''}`
     : allSpotsForCurrentDay.length > 0
     ? `${allSpotsForCurrentDay[0].title} ${allSpotsForCurrentDay[0].address || ''}`
     : fullData.trip.title;
@@ -923,7 +923,7 @@ function TripDetailInner({ params }: PageProps) {
               <div className="w-full lg:w-7/12 xl:w-3/5 space-y-4">
                 {/* 當日住宿橫幅 (自動帶入) */}
                 {matchingAccommodation && (
-                  <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-indigo-700 rounded-3xl p-5 text-white shadow-md shadow-blue-500/10 flex items-center justify-between">
+                  <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-indigo-700 rounded-3xl p-5 text-white shadow-md shadow-blue-500/10 flex items-center justify-between min-w-0 overflow-hidden">
                     <div className="flex items-center gap-3.5 min-w-0">
                       <span className="w-11 h-11 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center shrink-0 shadow-inner">
                         <Building2 className="w-5 h-5 text-white" />
@@ -932,14 +932,16 @@ function TripDetailInner({ params }: PageProps) {
                         <span className="text-[11px] font-bold text-blue-100 uppercase tracking-wider block">今晚入住飯店</span>
                         <h4 className="text-sm sm:text-base font-black truncate">{matchingAccommodation.name}</h4>
                         {matchingAccommodation.address && (
-                          <p className="text-xs text-blue-100/90 truncate mt-0.5">{matchingAccommodation.address}</p>
+                          <p className="text-xs text-blue-100/90 truncate mt-0.5">
+                            {matchingAccommodation.address.startsWith('http') ? '（未填寫詳細地址，可至住宿分頁查看參考連結）' : matchingAccommodation.address}
+                          </p>
                         )}
                       </div>
                     </div>
                     <a
                       href={
                         matchingAccommodation.google_map_url ||
-                        getGoogleMapsSearchUrl(`${matchingAccommodation.name} ${matchingAccommodation.address || ''}`)
+                        getGoogleMapsSearchUrl(`${matchingAccommodation.name} ${matchingAccommodation.address && !matchingAccommodation.address.startsWith('http') ? matchingAccommodation.address : ''}`)
                       }
                       target="_blank"
                       rel="noopener noreferrer"
