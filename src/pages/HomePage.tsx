@@ -171,7 +171,7 @@ export default function HomePage() {
   return (
     <div className="min-h-screen bg-slate-50/70 flex flex-col justify-between selection:bg-blue-100">
       {/* 頂部沉浸式 Hero 區塊 */}
-      <header className="bg-gradient-to-br from-blue-700 via-indigo-700 to-sky-700 text-white px-6 pt-12 pb-24 sm:pb-28 shadow-lg relative z-30">
+      <header className="bg-gradient-to-br from-blue-700 via-indigo-700 to-sky-700 text-white px-6 pt-6 sm:pt-8 pb-14 sm:pb-16 shadow-md relative z-10">
         {/* 背景環境光暈 */}
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
           <div className="absolute -left-20 -top-20 w-96 h-96 bg-blue-400/20 rounded-full blur-3xl" />
@@ -179,7 +179,7 @@ export default function HomePage() {
         </div>
 
         {/* 頂部右上角使用者登入 / 選單 */}
-        <div className="absolute top-4 sm:top-6 right-4 sm:right-6 z-40">
+        <div className="absolute top-4 sm:top-5 right-4 sm:right-6 z-40">
           <UserNav
             variant="dark"
             onViewMyTrips={() => {
@@ -189,38 +189,38 @@ export default function HomePage() {
         </div>
 
         <div className="max-w-6xl mx-auto flex flex-col items-center text-center relative z-10">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-white/20 backdrop-blur-md rounded-3xl mb-4 shadow-lg ring-1 ring-white/30">
-            <Compass className="w-9 h-9 text-white" />
+          <div className="inline-flex items-center justify-center w-12 h-12 bg-white/20 backdrop-blur-md rounded-2xl mb-2.5 shadow-md ring-1 ring-white/30">
+            <Compass className="w-6 h-6 text-white" />
           </div>
 
-          <div className="flex items-center gap-2 mb-4 flex-wrap justify-center">
-            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/15 text-blue-100 text-xs font-bold backdrop-blur-md border border-white/20 shadow-xs">
-              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+          <div className="flex items-center gap-2 mb-2.5 flex-wrap justify-center">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/15 text-blue-100 text-xs font-bold backdrop-blur-md border border-white/20 shadow-xs">
+              <Sparkles className="w-3 h-3 text-amber-300" />
               <span>2026 好友出遊即時協同規劃利器</span>
             </div>
             {isSupabaseConfigured ? (
-              <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/25 text-emerald-200 text-xs font-bold backdrop-blur-md border border-emerald-400/30">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/25 text-emerald-200 text-xs font-bold backdrop-blur-md border border-emerald-400/30">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                 <span>雲端資料庫：已連線</span>
               </div>
             ) : (
-              <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-500/25 text-amber-200 text-xs font-bold backdrop-blur-md border border-amber-400/30">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/25 text-amber-200 text-xs font-bold backdrop-blur-md border border-amber-400/30">
                 <span className="w-2 h-2 rounded-full bg-amber-400" />
                 <span>雲端資料庫：未連線 (離線單機模式)</span>
               </div>
             )}
           </div>
 
-          <h1 className="text-3xl sm:text-5xl md:text-6xl font-black tracking-tight mb-4 drop-shadow-xs">
+          <h1 className="text-2xl sm:text-4xl md:text-5xl font-black tracking-tight mb-2 drop-shadow-xs">
             Travel Planner
           </h1>
 
-          <p className="text-blue-100 text-sm sm:text-base md:text-lg leading-relaxed max-w-2xl mx-auto font-medium">
+          <p className="text-blue-100 text-xs sm:text-sm md:text-base leading-relaxed max-w-xl mx-auto font-medium">
             跨裝置登入同步・專屬房間協同・雙欄互動地圖・航班與住宿一站掌握
           </p>
 
           {/* 熱門靈感範本快速晶片 */}
-          <div className="mt-6 flex items-center justify-center gap-2 flex-wrap max-w-2xl">
+          <div className="mt-4 flex items-center justify-center gap-2 flex-wrap max-w-2xl">
             <span className="text-[11px] font-bold text-blue-200 uppercase tracking-wider block sm:inline">
               點擊快速套用靈感：
             </span>
@@ -243,7 +243,7 @@ export default function HomePage() {
       </header>
 
       {/* 主要操作卡片區 */}
-      <main className="max-w-6xl w-full mx-auto px-4 sm:px-6 lg:px-8 -mt-12 sm:-mt-16 flex-1 space-y-8 pb-16 relative z-20">
+      <main className="max-w-6xl w-full mx-auto px-4 sm:px-6 lg:px-8 -mt-8 sm:-mt-10 flex-1 space-y-8 pb-16 relative z-20">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           {/* 左側：建立新旅程 (佔 7 格) */}
           <div className="lg:col-span-7 bg-white/95 backdrop-blur-md rounded-3xl p-6 sm:p-8 shadow-xl border border-slate-100">
