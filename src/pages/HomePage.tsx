@@ -2,8 +2,17 @@
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { createNewTrip, isSupabaseConfigured, validateExistingSlugs } from '@/lib/supabase';
-import { pruneInvalidTripCaches } from '@/lib/storage';
+import { 
+  createNewTrip, 
+  isSupabaseConfigured, 
+  validateExistingSlugs, 
+  getUserJoinedTrips 
+} from '@/lib/supabase';
+import { pruneInvalidTripCaches, getStoredNickname, setStoredNickname } from '@/lib/storage';
+import { UserJoinedTrip } from '@/types/travel';
+import { useAuth } from '@/context/AuthContext';
+import { UserNav } from '@/components/UserNav';
+import { AuthModal } from '@/components/AuthModal';
 import { 
   Plus, 
   ArrowRight, 
@@ -19,19 +28,27 @@ import {
   Layers,
   Heart,
   Luggage,
-  Building2
+  Building2,
+  Cloud,
+  Smartphone,
+  User as UserIcon
 } from 'lucide-react';
 
 export default function HomePage() {
   const navigate = useNavigate();
+  const { user, userName } = useAuth();
 
   const [title, setTitle] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [pin, setPin] = useState('');
+  const [creatorNickname, setCreatorNickname] = useState('');
   const [joinSlug, setJoinSlug] = useState('');
   const [loading, setLoading] = useState(false);
   const [recentTrips, setRecentTrips] = useState<{ slug: string; title: string; date: string }[]>([]);
+  const [cloudTrips, setCloudTrips] = useState<UserJoinedTrip[]>([]);
+  const [loadingCloudTrips, setLoadingCloudTrips] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
 
   useEffect(() => {
     // 預設日期為一週後的五天旅程
@@ -73,6 +90,32 @@ export default function HomePage() {
     }
   }, []);
 
+  // 當使用者登入身分確立時，預填建立者暱稱建議
+  useEffect(() => {
+    if (userName && !creatorNickname) {
+      setCreatorNickname(userName);
+    } else if (!creatorNickname) {
+      const stored = getStoredNickname();
+      if (stored) setCreatorNickname(stored);
+    }
+  }, [user, userName]);
+
+  // 當使用者帳號變更時，抓取該使用者於雲端已加入的所有旅程清單（跨裝置同步）
+  useEffect(() => {
+    if (user?.id && isSupabaseConfigured) {
+      setLoadingCloudTrips(true);
+      getUserJoinedTrips(user.id)
+        .then((trips) => {
+          setCloudTrips(trips);
+        })
+        .finally(() => {
+          setLoadingCloudTrips(false);
+        });
+    } else {
+      setCloudTrips([]);
+    }
+  }, [user?.id]);
+
   const handleApplyTemplate = (sampleTitle: string, daysCount: number) => {
     setTitle(sampleTitle);
     const today = new Date();
@@ -91,7 +134,17 @@ export default function HomePage() {
     if (!title.trim() || !startDate || !endDate || pin.length < 4) return;
 
     setLoading(true);
-    const { trip, error, isOfflineOnly } = await createNewTrip(title.trim(), startDate, endDate, pin);
+    const finalNickname = creatorNickname.trim() || userName || '主辦人';
+    if (finalNickname) setStoredNickname(finalNickname);
+
+    const { trip, error, isOfflineOnly } = await createNewTrip(
+      title.trim(), 
+      startDate, 
+      endDate, 
+      pin,
+      user?.id,
+      finalNickname
+    );
 
     if (trip) {
       if (isOfflineOnly) {
@@ -123,6 +176,16 @@ export default function HomePage() {
         <div className="absolute -left-20 -top-20 w-96 h-96 bg-blue-400/20 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute right-0 top-1/4 w-80 h-80 bg-indigo-400/20 rounded-full blur-3xl pointer-events-none" />
 
+        {/* 頂部右上角使用者登入 / 選單 */}
+        <div className="absolute top-4 sm:top-6 right-4 sm:right-6 z-30">
+          <UserNav
+            variant="dark"
+            onViewMyTrips={() => {
+              document.getElementById('my-trips-section')?.scrollIntoView({ behavior: 'smooth' });
+            }}
+          />
+        </div>
+
         <div className="max-w-6xl mx-auto flex flex-col items-center text-center relative z-10">
           <div className="inline-flex items-center justify-center w-16 h-16 bg-white/20 backdrop-blur-md rounded-3xl mb-4 shadow-lg ring-1 ring-white/30">
             <Compass className="w-9 h-9 text-white" />
@@ -151,7 +214,7 @@ export default function HomePage() {
           </h1>
 
           <p className="text-blue-100 text-sm sm:text-base md:text-lg leading-relaxed max-w-2xl mx-auto font-medium">
-            免註冊專屬房間・好友即時同步・雙欄互動地圖・航班與住宿一站掌握
+            跨裝置登入同步・專屬房間協同・雙欄互動地圖・航班與住宿一站掌握
           </p>
 
           {/* 熱門靈感範本快速晶片 */}
@@ -188,7 +251,7 @@ export default function HomePage() {
               </span>
               <div>
                 <h2 className="text-xl font-black text-slate-900 tracking-tight">建立全新旅程</h2>
-                <p className="text-xs text-slate-400 mt-0.5">填寫旅程天數，立即獲取專屬免註冊協同房間</p>
+                <p className="text-xs text-slate-400 mt-0.5">填寫旅程資訊，立即獲取專屬房間並支援跨設備同步</p>
               </div>
             </div>
 
@@ -230,6 +293,27 @@ export default function HomePage() {
                 </div>
               </div>
 
+              {/* 綁定建立者在此旅程的專屬暱稱 */}
+              <div>
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="font-bold text-slate-800 text-xs">
+                    你在本旅程的專屬暱稱
+                  </label>
+                  {user ? (
+                    <span className="text-[11px] text-blue-600 font-bold">已連結至 {user.app_metadata?.provider || '帳號'}</span>
+                  ) : (
+                    <span className="text-[11px] text-slate-400">進入房間後亦可隨時更改</span>
+                  )}
+                </div>
+                <input
+                  type="text"
+                  placeholder={userName ? `例如：${userName}` : '例如：小明、阿瑋、Alice'}
+                  value={creatorNickname}
+                  onChange={(e) => setCreatorNickname(e.target.value)}
+                  className="w-full p-3.5 bg-slate-50 border border-slate-200/90 rounded-2xl text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
               <div>
                 <div className="flex justify-between items-center mb-1.5">
                   <label className="font-bold text-slate-800 text-xs">
@@ -265,8 +349,8 @@ export default function HomePage() {
             </form>
           </div>
 
-          {/* 右側：加入旅程 + 最近記錄 (佔 5 格) */}
-          <div className="lg:col-span-5 space-y-5">
+          {/* 右側：加入旅程 + 雲端旅程 + 最近記錄 (佔 5 格) */}
+          <div className="lg:col-span-5 space-y-5" id="my-trips-section">
             {/* 加入好友旅程卡片 */}
             <div className="bg-white/95 backdrop-blur-md rounded-3xl p-6 shadow-md border border-slate-100">
               <div className="flex items-center gap-3 mb-2">
@@ -296,6 +380,87 @@ export default function HomePage() {
                 </button>
               </form>
             </div>
+
+            {/* 若已登入：展示我加入的雲端旅程 (跨設備同步) */}
+            {user && (
+              <div className="bg-white/95 backdrop-blur-md rounded-3xl p-6 shadow-md border border-slate-100 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                    <Cloud className="w-4 h-4 text-blue-600" />
+                    <span>我的雲端旅程 ({cloudTrips.length})</span>
+                  </h3>
+                  <span className="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200/60 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    已跨設備同步
+                  </span>
+                </div>
+
+                {loadingCloudTrips ? (
+                  <div className="py-6 flex flex-col items-center justify-center gap-2 text-slate-400">
+                    <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                    <span className="text-xs">同步雲端旅程中...</span>
+                  </div>
+                ) : cloudTrips.length > 0 ? (
+                  <div className="space-y-2 max-h-72 overflow-y-auto no-scrollbar">
+                    {cloudTrips.map((item) => (
+                      <button
+                        key={item.slug}
+                        onClick={() => navigate(`/trip/${item.slug}`)}
+                        className="w-full bg-slate-50 hover:bg-blue-50/70 p-4 rounded-2xl border border-slate-200/80 hover:border-blue-400 flex items-center justify-between transition-all text-left group cursor-pointer"
+                      >
+                        <div className="min-w-0 pr-3">
+                          <h4 className="text-xs font-bold text-slate-900 truncate group-hover:text-blue-600 transition-colors">
+                            {item.title}
+                          </h4>
+                          {item.start_date && (
+                            <p className="text-[10px] text-slate-400 font-medium mt-0.5">
+                              {item.start_date} ~ {item.end_date}
+                            </p>
+                          )}
+                          <div className="mt-1.5 inline-flex items-center gap-1 text-[10px] font-bold text-blue-700 bg-blue-100/70 px-2 py-0.5 rounded-md">
+                            <UserIcon className="w-3 h-3" />
+                            <span>你的暱稱：{item.my_nickname}</span>
+                          </div>
+                        </div>
+                        <ArrowRight className="w-4 h-4 text-slate-300 group-hover:text-blue-600 group-hover:translate-x-0.5 transition-all shrink-0" />
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="p-4 rounded-2xl bg-slate-50 border border-dashed border-slate-200 text-center">
+                    <p className="text-xs font-bold text-slate-600">尚未加入任何雲端旅程</p>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      建立新旅程或輸入上方好友房間短碼，即可在此帳號永久同步！
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 若未登入：展示第三方登入引導卡片 */}
+            {!user && (
+              <div className="bg-gradient-to-br from-indigo-50/90 via-blue-50/60 to-white backdrop-blur-md rounded-3xl p-6 shadow-sm border border-blue-100/80 space-y-3">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-9 h-9 rounded-2xl bg-blue-600 text-white flex items-center justify-center font-bold shadow-sm shadow-blue-500/30">
+                    <Smartphone className="w-5 h-5" />
+                  </span>
+                  <div>
+                    <h4 className="text-xs font-black text-slate-900">跨手機與電腦同步出遊行程</h4>
+                    <p className="text-[11px] text-slate-500">不再受限於單一設備快取</p>
+                  </div>
+                </div>
+                <p className="text-xs text-slate-600 leading-relaxed font-medium">
+                  使用 Google 或 Facebook 第三方登入，不同裝置都能隨時查看已加入的旅程，並為每個旅程獨立綁定暱稱！
+                </p>
+                <button
+                  onClick={() => setShowAuthModal(true)}
+                  className="w-full py-3 bg-white hover:bg-slate-50 border border-slate-200/90 hover:border-blue-400 text-slate-800 font-bold rounded-2xl text-xs shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <span>使用 Google / Facebook 登入</span>
+                  <ArrowRight className="w-3.5 h-3.5 text-blue-600" />
+                </button>
+              </div>
+            )}
 
             {/* 本機最近開啟記錄 */}
             {recentTrips.length > 0 && (
@@ -376,6 +541,12 @@ export default function HomePage() {
       <footer className="py-8 text-center text-xs text-slate-400 border-t border-slate-200/80 bg-white/70 backdrop-blur-md">
         Travel Planner &copy; 2026 ・ 專為好友群組出遊打造的高效協同規劃平台
       </footer>
+
+      {/* 登入彈窗 */}
+      <AuthModal
+        isOpen={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+      />
     </div>
   );
 }

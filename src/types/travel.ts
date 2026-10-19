@@ -7,6 +7,7 @@ export interface Trip {
   start_date: string;
   end_date: string;
   pin_hash: string;
+  created_by?: string;
   created_at: string;
 }
 
@@ -15,7 +16,19 @@ export interface TripMember {
   trip_id: string;
   nickname: string;
   device_id: string;
+  user_id?: string;
   created_at: string;
+}
+
+export interface UserJoinedTrip {
+  id: string;
+  slug: string;
+  title: string;
+  start_date: string;
+  end_date: string;
+  created_at: string;
+  my_nickname: string;
+  member_count?: number;
 }
 
 export interface ItineraryDay {
