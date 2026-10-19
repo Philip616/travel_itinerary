@@ -8,13 +8,15 @@ import {
   SpotItem, 
   FullTripData,
   SpotVote,
-  SpotComment
+  SpotComment,
+  UserJoinedTrip
 } from '@/types/travel';
 import { 
   getLocalTripCache, 
   setLocalTripCache, 
   removeLocalTripCache, 
-  setRoomNickname 
+  setRoomNickname,
+  getDeviceId
 } from './storage';
 
 const supabaseUrl = import.meta.env.NEXT_PUBLIC_SUPABASE_URL || import.meta.env.VITE_SUPABASE_URL || '';
@@ -26,8 +28,144 @@ export const isSupabaseConfigured =
   !supabaseUrl.includes('placeholder-project');
 
 export const supabase = isSupabaseConfigured 
-  ? createClient(supabaseUrl, supabaseAnonKey) 
+  ? createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        autoRefreshToken: true,
+        persistSession: true,
+        detectSessionInUrl: true
+      }
+    }) 
   : null;
+
+// ============================================================
+// 第三方登入 (OAuth: Google / Facebook)
+// ============================================================
+
+export async function signInWithGoogle(): Promise<{ error: string | null }> {
+  if (!supabase) {
+    return { error: 'Supabase 尚未連線，請確認 .env.local 配置' };
+  }
+  try {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: window.location.origin,
+      },
+    });
+    if (error) return { error: error.message };
+    return { error: null };
+  } catch (err: any) {
+    return { error: err?.message || 'Google 登入連線失敗' };
+  }
+}
+
+export async function signInWithFacebook(): Promise<{ error: string | null }> {
+  if (!supabase) {
+    return { error: 'Supabase 尚未連線，請確認 .env.local 配置' };
+  }
+  try {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'facebook',
+      options: {
+        redirectTo: window.location.origin,
+      },
+    });
+    if (error) return { error: error.message };
+    return { error: null };
+  } catch (err: any) {
+    return { error: err?.message || 'Facebook 登入連線失敗' };
+  }
+}
+
+export async function signOutUser(): Promise<{ error: string | null }> {
+  if (!supabase) return { error: null };
+  try {
+    const { error } = await supabase.auth.signOut();
+    if (error) return { error: error.message };
+    return { error: null };
+  } catch (err: any) {
+    return { error: err?.message || '登出失敗' };
+  }
+}
+
+// 查詢使用者帳號已綁定/加入的所有雲端旅程清單（跨裝置同步）
+export async function getUserJoinedTrips(userId: string): Promise<UserJoinedTrip[]> {
+  if (!supabase || !userId) return [];
+  try {
+    const { data, error } = await supabase
+      .from('trip_members')
+      .select(`
+        nickname,
+        created_at,
+        trips (
+          id,
+          slug,
+          title,
+          start_date,
+          end_date,
+          created_at
+        )
+      `)
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (!error && data) {
+      const result: UserJoinedTrip[] = [];
+      for (const item of data) {
+        const t: any = Array.isArray(item.trips) ? item.trips[0] : item.trips;
+        if (t && t.slug) {
+          result.push({
+            id: t.id,
+            slug: t.slug,
+            title: t.title,
+            start_date: t.start_date,
+            end_date: t.end_date,
+            created_at: t.created_at,
+            my_nickname: item.nickname,
+          });
+        }
+      }
+      return result;
+    }
+
+    // PostgREST 備援查詢：若 Join 語法受阻，採用兩階段查詢
+    const { data: memberRows, error: mErr } = await supabase
+      .from('trip_members')
+      .select('trip_id, nickname, created_at')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (mErr || !memberRows || memberRows.length === 0) return [];
+
+    const tripIds = memberRows.map((m) => m.trip_id);
+    const { data: tripRows, error: tErr } = await supabase
+      .from('trips')
+      .select('id, slug, title, start_date, end_date, created_at')
+      .in('id', tripIds);
+
+    if (tErr || !tripRows) return [];
+
+    const tripMap = new Map(tripRows.map((t) => [t.id, t]));
+    return memberRows
+      .map((m) => {
+        const t = tripMap.get(m.trip_id);
+        if (!t) return null;
+        return {
+          id: t.id,
+          slug: t.slug,
+          title: t.title,
+          start_date: t.start_date,
+          end_date: t.end_date,
+          created_at: t.created_at,
+          my_nickname: m.nickname,
+        };
+      })
+      .filter(Boolean) as UserJoinedTrip[];
+  } catch (err) {
+    console.warn('取得使用者加入旅程清單異常:', err);
+    return [];
+  }
+}
 
 // SHA-256 PIN 雜湊輔助函式
 export async function hashPin(pin: string): Promise<string> {
@@ -50,12 +188,15 @@ export async function createNewTrip(
   title: string,
   startDate: string,
   endDate: string,
-  pin: string
+  pin: string,
+  userId?: string,
+  creatorNickname?: string
 ): Promise<{ trip: Trip | null; error: string | null; isOfflineOnly?: boolean }> {
   const slug = generateSlug(title);
   const pin_hash = await hashPin(pin);
   const tripId = 'trip_' + Math.random().toString(36).substring(2, 11);
   const now = new Date().toISOString();
+  const deviceId = getDeviceId();
 
   // 計算天數以初始化每日行程
   const start = new Date(startDate);
@@ -69,6 +210,7 @@ export async function createNewTrip(
     start_date: startDate,
     end_date: endDate,
     pin_hash,
+    created_by: userId,
     created_at: now
   };
 
@@ -87,9 +229,22 @@ export async function createNewTrip(
     });
   }
 
+  const initialMembers: TripMember[] = [];
+  if (creatorNickname?.trim()) {
+    initialMembers.push({
+      id: `mem_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      trip_id: tripId,
+      nickname: creatorNickname.trim(),
+      device_id: deviceId,
+      user_id: userId,
+      created_at: now
+    });
+    setRoomNickname(slug, creatorNickname.trim());
+  }
+
   const initialFullData: FullTripData = {
     trip: newTrip,
-    members: [],
+    members: initialMembers,
     days: initialDays,
     accommodations: [],
     flights: []
@@ -98,13 +253,42 @@ export async function createNewTrip(
   // 若已配置 Supabase 則同步至雲端
   if (supabase) {
     try {
+      const tripInsertPayload: any = {
+        slug,
+        title,
+        start_date: startDate,
+        end_date: endDate,
+        pin_hash
+      };
+      if (userId) {
+        tripInsertPayload.created_by = userId;
+      }
+
       const { data: tripData, error: tripErr } = await supabase
         .from('trips')
-        .insert([{ slug, title, start_date: startDate, end_date: endDate, pin_hash }])
+        .insert([tripInsertPayload])
         .select()
         .single();
 
       if (tripErr) throw tripErr;
+
+      // 若有提供建立者暱稱，同步註冊建立者成員資料
+      let savedMembers: TripMember[] = [];
+      if (creatorNickname?.trim()) {
+        const memberPayload: any = {
+          trip_id: tripData.id,
+          nickname: creatorNickname.trim(),
+          device_id: deviceId
+        };
+        if (userId) {
+          memberPayload.user_id = userId;
+        }
+        const { data: memData } = await supabase
+          .from('trip_members')
+          .insert([memberPayload])
+          .select();
+        if (memData) savedMembers = memData;
+      }
 
       const daysToInsert = initialDays.map(d => ({
         trip_id: tripData.id,
@@ -128,7 +312,7 @@ export async function createNewTrip(
 
       setLocalTripCache(slug, {
         trip: tripData,
-        members: [],
+        members: savedMembers,
         days: syncedDays,
         accommodations: [],
         flights: []
@@ -331,7 +515,8 @@ export async function leaveTripMember(
   tripId: string,
   slug: string,
   deviceId: string,
-  nickname: string
+  nickname: string,
+  userId?: string
 ): Promise<{ success: boolean; error: string | null }> {
   // 1. 清除本地此房間快取與房間專屬暱稱
   removeLocalTripCache(slug);
@@ -340,7 +525,9 @@ export async function leaveTripMember(
   if (supabase) {
     try {
       let query = supabase.from('trip_members').delete().eq('trip_id', tripId);
-      if (deviceId && deviceId !== 'server_device') {
+      if (userId) {
+        query = query.eq('user_id', userId);
+      } else if (deviceId && deviceId !== 'server_device') {
         query = query.eq('device_id', deviceId);
       } else if (nickname) {
         query = query.eq('nickname', nickname.trim());
@@ -434,12 +621,13 @@ export async function deleteTrip(slug: string, tripId: string): Promise<{ succes
   return { success: true, error: null };
 }
 
-// 登記或更新成員至旅程房間 (支援離線快取與雲端同步)
+// 登記或更新成員至旅程房間 (支援離線快取、雲端同步與第三方帳號綁定)
 export async function registerTripMember(
   tripId: string,
   slug: string,
   nickname: string,
-  deviceId: string
+  deviceId: string,
+  userId?: string
 ): Promise<{ member: TripMember | null; error: string | null }> {
   const cleanName = nickname.trim();
   if (!cleanName) return { member: null, error: '暱稱不可為空' };
@@ -453,6 +641,7 @@ export async function registerTripMember(
     trip_id: tripId,
     nickname: cleanName,
     device_id: deviceId,
+    user_id: userId,
     created_at: now
   };
 
@@ -461,12 +650,13 @@ export async function registerTripMember(
   if (localCache) {
     if (!localCache.members) localCache.members = [];
     const existingIndex = localCache.members.findIndex(
-      (m) => (m.device_id && m.device_id === deviceId) || m.nickname.toLowerCase() === cleanName.toLowerCase()
+      (m) => (userId && m.user_id === userId) || (m.device_id && m.device_id === deviceId) || m.nickname.toLowerCase() === cleanName.toLowerCase()
     );
     if (existingIndex >= 0) {
       localCache.members[existingIndex] = {
         ...localCache.members[existingIndex],
-        nickname: cleanName
+        nickname: cleanName,
+        user_id: userId || localCache.members[existingIndex].user_id
       };
       resultMember = localCache.members[existingIndex];
     } else {
@@ -485,14 +675,21 @@ export async function registerTripMember(
 
       if (queryErr) throw queryErr;
 
-      const existing = existingList?.find(
-        (m: TripMember) => (m.device_id && m.device_id === deviceId) || m.nickname.toLowerCase() === cleanName.toLowerCase()
+      // 優先依 userId 匹配，其次依 deviceId 或同名匹配
+      const existing = existingList?.find((m: TripMember) => 
+        (userId && m.user_id === userId) || 
+        (!userId && m.device_id && m.device_id === deviceId) || 
+        (!userId && m.nickname.toLowerCase() === cleanName.toLowerCase())
       );
 
       if (existing) {
+        const updatePayload: any = { nickname: cleanName };
+        if (userId && !existing.user_id) {
+          updatePayload.user_id = userId;
+        }
         const { data: updated, error: updateErr } = await supabase
           .from('trip_members')
-          .update({ nickname: cleanName })
+          .update(updatePayload)
           .eq('id', existing.id)
           .select()
           .single();
@@ -500,13 +697,17 @@ export async function registerTripMember(
         if (updateErr) throw updateErr;
         return { member: updated, error: null };
       } else {
+        const insertPayload: any = {
+          trip_id: tripId,
+          nickname: cleanName,
+          device_id: deviceId
+        };
+        if (userId) {
+          insertPayload.user_id = userId;
+        }
         const { data: inserted, error: insertErr } = await supabase
           .from('trip_members')
-          .insert([{
-            trip_id: tripId,
-            nickname: cleanName,
-            device_id: deviceId
-          }])
+          .insert([insertPayload])
           .select()
           .single();
 

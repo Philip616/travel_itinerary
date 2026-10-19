@@ -10,15 +10,17 @@ create table if not exists public.trips (
     start_date date not null,
     end_date date not null,
     pin_hash text not null,
+    created_by uuid references auth.users(id) on delete set null,
     created_at timestamptz default now() not null
 );
 
--- 2. Trip Members 表 (成員暱稱與設備識別)
+-- 2. Trip Members 表 (成員暱稱與設備識別，支援第三方帳號綁定)
 create table if not exists public.trip_members (
     id uuid default gen_random_uuid() primary key,
     trip_id uuid references public.trips(id) on delete cascade not null,
     nickname text not null,
     device_id text not null,
+    user_id uuid references auth.users(id) on delete cascade,
     created_at timestamptz default now() not null
 );
 
@@ -108,6 +110,9 @@ create table if not exists public.accommodation_comments (
 
 -- 建立索引以確保即時查詢效能
 create index if not exists idx_trips_slug on public.trips(slug);
+create index if not exists idx_trips_created_by on public.trips(created_by);
+create index if not exists idx_trip_members_user on public.trip_members(user_id);
+create unique index if not exists idx_trip_members_trip_user on public.trip_members (trip_id, user_id) where user_id is not null;
 create index if not exists idx_itinerary_days_trip on public.itinerary_days(trip_id, day_number);
 create index if not exists idx_spot_items_day on public.spot_items(day_id, sort_order);
 create index if not exists idx_flights_trip on public.flights(trip_id);

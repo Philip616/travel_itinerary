@@ -9,24 +9,29 @@
 1. **免註冊專屬房間協同**：
    - 建立旅程後立即生成專屬短代碼與分享網址，丟到 LINE 群組點開即可加入。
    - 每位成員輸入暱稱即可新增景點、排定時程、按讚票選與登記機票。
-2. **電腦網頁與手機雙模自適應**：
+2. **Google / Facebook 第三方登入與跨設備同步**：
+   - 支援 Google 與 Facebook OAuth 一鍵登入。
+   - 徹底告別單一設備快取限制：手機出遊查行程、電腦大螢幕排細節，換裝置依然能查看所有加入過的旅程。
+   - **每個旅程獨立綁定暱稱**：同一帳號可在公司員工旅遊叫「主管」，好友出遊叫「阿瑋」，互不干擾。
+   - 未登入訪客依舊能透過房間代碼無障礙協同編輯（向下相容離線快取）。
+3. **電腦網頁與手機雙模自適應**：
    - **電腦網頁版**：採用雙欄儀表板佈局，左側時間軸與景點卡片、右側常駐互動地圖與預算統計，上方整合導航列。
    - **手機行動版**：保留拇指友善的底部導航與輕量流暢操作。
-3. **雙欄互動地圖即時預覽**：
+4. **雙欄互動地圖即時預覽**：
    - 點擊任一景點或住宿，右側地圖自動定位並聚焦。
    - 支援快速切換景點標籤與一鍵喚醒 Google 地圖導航。
-4. **主辦人 4 位數 PIN 碼防呆**：
+5. **主辦人 4 位數 PIN 碼防呆**：
    - 一般成員自由參與編輯與留言。
    - 刪除整趟旅程或修改核心日期需輸入主辦人管理密碼，避免群組成員誤刪。
-5. **每日行程即時時間軸**：
+6. **每日行程即時時間軸**：
    - 橫向滑動切換天數（Day 1, Day 2...）。
    - 支援景點類別標籤（景點、美食、購物、交通）、預估費用、時段規劃。
    - 景點按讚投票與留言討論抽屜。
-6. **當晚住宿自動帶入**：
+7. **當晚住宿自動帶入**：
    - 登記飯店起訖日期後，系統自動於每日行程頂端顯示「當晚住宿」與導航按鈕，省去重複輸入。
-7. **獨立航班對照表分頁**：
+8. **獨立航班對照表分頁**：
    - 清楚條列不同成員的去程與回程班機時間、航廈、航班編號，方便各路好友接送與集合。
-8. **PWA + 本地快取**：
+9. **PWA + 本地快取**：
    - 支援安裝至手機主畫面（Add to Home Screen）。
    - 內建離線快取機制，弱網環境下依然能順暢開啟並查閱所有行程與航班。
 
@@ -35,6 +40,7 @@
 ## 🛠 技術堆疊
 
 - **前端框架與打包**：Vite + React 19 (SPA, React Router v7)
+- **認證與登入**：Supabase Auth (Google & Facebook OAuth)
 - **樣式設計**：Tailwind CSS v4 (原生 `@tailwindcss/vite` 插件)
 - **圖示庫**：Lucide React
 - **資料庫與即時同步**：Supabase (PostgreSQL + Realtime WebSocket)
@@ -71,13 +77,25 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 
 ### 3. Supabase 資料庫設定
 
-登入 [Supabase Dashboard](https://supabase.com)，前往 **SQL Editor**，執行專案底下的 SQL 檔案：
-```text
-supabase/schema.sql
-```
-該腳本會自動建立所有必要資料表、索引、RLS 安全政策與 Realtime 推播訂閱。
+登入 [Supabase Dashboard](https://supabase.com)，前往 **SQL Editor**：
+- **全新專案**：執行 `supabase/schema.sql` 建立所有資料表、索引、RLS 安全政策與 Realtime 推播訂閱。
+- **既有專案升級**：若已建立舊版資料庫，只需執行 `supabase/migration_auth.sql` 即可為 trips 與 trip_members 新增第三方帳號關聯與查詢索引。
 
-### 4. 本地啟動開發伺服器
+### 4. 設定第三方登入 (Google & Facebook OAuth)
+
+前往 Supabase Dashboard -> **Authentication** -> **Providers**：
+1. **Google 登入設定**：
+   - 於 Google Cloud Console 建立 OAuth 2.0 Client ID。
+   - 將 Supabase 提供之 **Callback URL (for OAuth)** (如 `https://<project-id>.supabase.co/auth/v1/callback`) 加入「已授權的重新導向 URI」。
+   - 將 Client ID 與 Client Secret 貼入 Supabase 後台並啟用 Google Provider。
+2. **Facebook 登入設定**：
+   - 於 Meta for Developers 建立應用程式並新增 Facebook 登入。
+   - 將 Supabase Callback URL 加入 Facebook 登入的「有效的 OAuth 重新導向 URI」。
+   - 將 App ID 與 App Secret 貼入 Supabase 後台並啟用 Facebook Provider。
+3. **URL Configuration**：
+   - 在 **Authentication** -> **URL Configuration** 中，將你的網站域名（例如 `http://localhost:5173` 或生產環境域名）加入 **Redirect URLs**。
+
+### 5. 本地啟動開發伺服器
 
 ```bash
 npm run dev
