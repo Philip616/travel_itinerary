@@ -1130,18 +1130,26 @@ function TripDetailInner({ slug }: { slug: string }) {
   return (
     <div className="min-h-screen bg-slate-50/70 flex flex-col selection:bg-blue-100">
       {/* 頂部沉浸式 Hero 旅遊橫幅 (Wanderlust Destination Header) */}
-      <section className="bg-gradient-to-r from-blue-700 via-indigo-700 to-sky-600 text-white relative shadow-lg z-30">
+      <section className="bg-gradient-to-r from-blue-700 via-indigo-700 to-sky-600 text-white relative shadow-lg z-50">
         {/* 背景環境裝飾光暈（獨立 overflow-hidden 容器，防止子層下拉選單被截斷） */}
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
           <div className="absolute -right-20 -top-20 w-80 h-80 bg-white/10 rounded-full blur-3xl" />
           <div className="absolute left-1/3 -bottom-24 w-72 h-72 bg-sky-400/15 rounded-full blur-2xl" />
         </div>
 
+        {/* 頂部最右上角使用者登入 / 選單（與首頁完全統一，避免與旅程操作按鈕混淆或被遮蔽） */}
+        <div className="absolute top-4 sm:top-6 right-4 sm:right-6 z-50">
+          <UserNav
+            variant="dark"
+            onViewMyTrips={() => navigate('/')}
+          />
+        </div>
+
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-7 relative z-10">
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-5">
             <div className="space-y-3">
-              {/* 頂部微標籤組 */}
-              <div className="flex items-center gap-2 flex-wrap">
+              {/* 頂部微標籤組 (在手機版預留右側空間避免與 UserNav 重疊) */}
+              <div className="flex items-center gap-2 flex-wrap pr-32 sm:pr-0">
                 <button
                   onClick={() => navigate('/')}
                   className="inline-flex items-center gap-1.5 text-xs font-bold text-white/90 hover:text-white bg-white/15 hover:bg-white/25 backdrop-blur-md px-3 py-1.5 rounded-xl transition-all cursor-pointer shadow-2xs"
@@ -1225,7 +1233,7 @@ function TripDetailInner({ slug }: { slug: string }) {
             </div>
 
             {/* 右側快速操作按鈕組 */}
-            <div className="flex items-center gap-2 shrink-0 flex-wrap relative z-50">
+            <div className="flex items-center gap-2 shrink-0 flex-wrap">
               <button
                 onClick={() => setShowNicknameModal(true)}
                 className="px-4 py-2.5 bg-white/15 hover:bg-white/25 backdrop-blur-md text-white font-bold rounded-2xl text-xs transition-all cursor-pointer border border-white/20"
@@ -1239,14 +1247,13 @@ function TripDetailInner({ slug }: { slug: string }) {
                 <Share2 className="w-4 h-4" />
                 <span>邀請旅伴加入</span>
               </button>
-              <UserNav variant="dark" />
             </div>
           </div>
         </div>
       </section>
 
       {/* 桌面版次級導航列 (Sticky Sub-Navigation) */}
-      <nav className="hidden md:block sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/90 shadow-2xs">
+      <nav className="hidden md:block sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200/90 shadow-2xs">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between">
           <div className="flex items-center gap-1">
             {navTabs.map((tab) => {
