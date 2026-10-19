@@ -40,6 +40,8 @@ import { AccommodationSection } from '@/components/AccommodationSection';
 import { NicknameModal } from '@/components/NicknameModal';
 import { ShareModal } from '@/components/ShareModal';
 import { AdminPinModal } from '@/components/AdminPinModal';
+import { UserNav } from '@/components/UserNav';
+import { useAuth } from '@/context/AuthContext';
 import { 
   Share2, 
   Plus, 
@@ -74,6 +76,7 @@ export default function TripDetailPage() {
 
 function TripDetailInner({ slug }: { slug: string }) {
   const navigate = useNavigate();
+  const { user, userName } = useAuth();
 
   const [fullData, setFullData] = useState<FullTripData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -104,17 +107,8 @@ function TripDetailInner({ slug }: { slug: string }) {
   const currentMemberRef = useRef<string>('');
   currentMemberRef.current = currentMember;
 
-  // 初始化載入
+  // 初始化載入旅程資料並解析綁定暱稱
   useEffect(() => {
-    // 1. 檢查此特定房間專屬暱稱 (Room-scoped)
-    const roomNickname = getRoomNickname(slug);
-    if (roomNickname) {
-      setCurrentMember(roomNickname);
-    } else {
-      // 首次進入此房間：絕不在背景靜默登記，強制彈出設定視窗確認
-      setShowNicknameModal(true);
-    }
-
     async function loadData() {
       setLoading(true);
       const data = await fetchFullTrip(slug);
@@ -126,9 +120,29 @@ function TripDetailInner({ slug }: { slug: string }) {
             setActiveSpotId(data.days[0].spots[0].id);
           }
         }
-        // 若使用者在此房間已有經確認的專屬暱稱，向雲端確認登記
-        if (roomNickname) {
-          registerTripMember(data.trip.id, slug, roomNickname, getDeviceId()).then((res) => {
+
+        // 1. 若已登入第三方帳號，優先比對雲端已登記成員中是否有此帳號綁定的暱稱
+        let resolvedNickname = '';
+        if (user) {
+          const matchedUserMember = data.members.find((m) => m.user_id === user.id);
+          if (matchedUserMember) {
+            resolvedNickname = matchedUserMember.nickname;
+          }
+        }
+
+        // 2. 若無帳號關聯紀錄，則讀取此房間專屬本機快取暱稱 (Room-scoped)
+        if (!resolvedNickname) {
+          const roomNick = getRoomNickname(slug);
+          if (roomNick) {
+            resolvedNickname = roomNick;
+          }
+        }
+
+        if (resolvedNickname) {
+          setCurrentMember(resolvedNickname);
+          setRoomNickname(slug, resolvedNickname);
+          // 向雲端確認成員登記（若是登入用戶則同步綁定 user_id）
+          registerTripMember(data.trip.id, slug, resolvedNickname, getDeviceId(), user?.id).then((res) => {
             if (res.member) {
               setFullData((prev) => {
                 if (!prev) return prev;
@@ -139,6 +153,9 @@ function TripDetailInner({ slug }: { slug: string }) {
               });
             }
           });
+        } else {
+          // 首次進入此房間且尚未登記任何暱稱：強制跳出設定視窗確認
+          setShowNicknameModal(true);
         }
       } else {
         setIsOfflineMode(true);
@@ -289,6 +306,23 @@ function TripDetailInner({ slug }: { slug: string }) {
       window.removeEventListener('online', handleSyncOnReconnect);
     };
   }, [slug]);
+
+  // 當使用者在旅程頁面中登入帳號時，自動將當前房間暱稱與該第三方帳號綁定，並同步至雲端
+  useEffect(() => {
+    if (user?.id && fullData?.trip?.id && currentMember) {
+      registerTripMember(fullData.trip.id, slug, currentMember, getDeviceId(), user.id).then((res) => {
+        if (res.member) {
+          setFullData((prev) => {
+            if (!prev) return prev;
+            const filtered = prev.members.filter(
+              (m) => m.id !== res.member?.id && m.nickname.toLowerCase() !== res.member?.nickname.toLowerCase()
+            );
+            return { ...prev, members: [...filtered, res.member!] };
+          });
+        }
+      });
+    }
+  }, [user?.id]);
 
   // 更新快取並同步 state
   const updateData = (newData: FullTripData) => {
@@ -993,7 +1027,7 @@ function TripDetailInner({ slug }: { slug: string }) {
     if (!window.confirm('確定要退出此旅程房間嗎？退出後本機將清除此房間紀錄，但你已排定的景點與留言仍會保留。')) {
       return;
     }
-    await leaveTripMember(fullData.trip.id, slug, getDeviceId(), currentMember);
+    await leaveTripMember(fullData.trip.id, slug, getDeviceId(), currentMember, user?.id);
     alert('你已成功退出此旅程房間。');
     navigate('/');
   };
@@ -1179,12 +1213,17 @@ function TripDetailInner({ slug }: { slug: string }) {
                 <span className="inline-flex items-center gap-1.5">
                   <User className="w-4 h-4 text-blue-200" />
                   我的身份：<span className="font-bold text-white underline decoration-white/40">{currentMember || '未設定'}</span>
+                  {user && (
+                    <span className="text-[10px] bg-emerald-400/20 text-emerald-200 border border-emerald-300/30 px-1.5 py-0.5 rounded-md font-bold">
+                      已同步帳號
+                    </span>
+                  )}
                 </span>
               </div>
             </div>
 
             {/* 右側快速操作按鈕組 */}
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-2 shrink-0 flex-wrap">
               <button
                 onClick={() => setShowNicknameModal(true)}
                 className="px-4 py-2.5 bg-white/15 hover:bg-white/25 backdrop-blur-md text-white font-bold rounded-2xl text-xs transition-all cursor-pointer border border-white/20"
@@ -1198,6 +1237,7 @@ function TripDetailInner({ slug }: { slug: string }) {
                 <Share2 className="w-4 h-4" />
                 <span>邀請旅伴加入</span>
               </button>
+              <UserNav variant="dark" />
             </div>
           </div>
         </div>
@@ -1769,13 +1809,13 @@ function TripDetailInner({ slug }: { slug: string }) {
       {/* 各彈窗組件 */}
       <NicknameModal
         isOpen={showNicknameModal}
-        initialNickname={currentMember || getStoredNickname()}
+        initialNickname={currentMember || userName || getStoredNickname()}
         onSave={async (name) => {
           setCurrentMember(name);
           setRoomNickname(slug, name);
           setShowNicknameModal(false);
           if (fullData) {
-            const res = await registerTripMember(fullData.trip.id, slug, name, getDeviceId());
+            const res = await registerTripMember(fullData.trip.id, slug, name, getDeviceId(), user?.id);
             if (res.member) {
               setFullData((prev) => {
                 if (!prev) return prev;
