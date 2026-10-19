@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { X, Sparkles, AlertCircle, Smartphone, Monitor, ShieldCheck, CheckCircle2 } from 'lucide-react';
 
@@ -19,14 +19,50 @@ export function AuthModal({
   const [loadingProvider, setLoadingProvider] = useState<'google' | 'facebook' | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // 監聽頁面恢復 (pageshow / bfcache) 與視窗聚焦 (focus)，當使用者在第三方頁面失敗按「上一頁」回到頁面時，自動解除轉圈鎖定
+  useEffect(() => {
+    const handleResetLoading = () => {
+      setLoadingProvider(null);
+    };
+
+    window.addEventListener('pageshow', handleResetLoading);
+    window.addEventListener('focus', handleResetLoading);
+    document.addEventListener('visibilitychange', handleResetLoading);
+
+    return () => {
+      window.removeEventListener('pageshow', handleResetLoading);
+      window.removeEventListener('focus', handleResetLoading);
+      document.removeEventListener('visibilitychange', handleResetLoading);
+    };
+  }, []);
+
+  // 當彈窗關閉或重新打開時重設狀態
+  useEffect(() => {
+    if (!isOpen) {
+      setLoadingProvider(null);
+      setErrorMessage(null);
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const handleGoogleLogin = async () => {
     setLoadingProvider('google');
     setErrorMessage(null);
-    const { error } = await signInWithGoogle();
-    if (error) {
-      setErrorMessage(error);
+    try {
+      // 設置 4 秒安全保護定時器，避免第三方跳轉失敗時按鈕永久轉圈卡死
+      const safetyTimer = setTimeout(() => {
+        setLoadingProvider(null);
+      }, 4000);
+
+      const { error } = await signInWithGoogle();
+      if (error) {
+        clearTimeout(safetyTimer);
+        setErrorMessage(error);
+        setLoadingProvider(null);
+      }
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Google 登入連線失敗');
       setLoadingProvider(null);
     }
   };
@@ -34,9 +70,19 @@ export function AuthModal({
   const handleFacebookLogin = async () => {
     setLoadingProvider('facebook');
     setErrorMessage(null);
-    const { error } = await signInWithFacebook();
-    if (error) {
-      setErrorMessage(error);
+    try {
+      const safetyTimer = setTimeout(() => {
+        setLoadingProvider(null);
+      }, 4000);
+
+      const { error } = await signInWithFacebook();
+      if (error) {
+        clearTimeout(safetyTimer);
+        setErrorMessage(error);
+        setLoadingProvider(null);
+      }
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Facebook 登入連線失敗');
       setLoadingProvider(null);
     }
   };
@@ -63,9 +109,21 @@ export function AuthModal({
 
         {/* 錯誤提示 */}
         {errorMessage && (
-          <div className="mb-4 p-3 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-            <div className="leading-tight font-medium">{errorMessage}</div>
+          <div className="mb-4 p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-start justify-between gap-2 animate-in fade-in duration-150">
+            <div className="flex items-start gap-2 min-w-0">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <div className="leading-tight font-medium break-words">{errorMessage}</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setErrorMessage(null);
+                setLoadingProvider(null);
+              }}
+              className="text-[11px] text-rose-600 font-bold hover:underline shrink-0 cursor-pointer ml-1.5"
+            >
+              關閉
+            </button>
           </div>
         )}
 

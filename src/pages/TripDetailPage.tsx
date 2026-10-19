@@ -1130,10 +1130,12 @@ function TripDetailInner({ slug }: { slug: string }) {
   return (
     <div className="min-h-screen bg-slate-50/70 flex flex-col selection:bg-blue-100">
       {/* 頂部沉浸式 Hero 旅遊橫幅 (Wanderlust Destination Header) */}
-      <section className="bg-gradient-to-r from-blue-700 via-indigo-700 to-sky-600 text-white relative overflow-hidden shadow-lg">
-        {/* 背景環境裝飾光暈 */}
-        <div className="absolute -right-20 -top-20 w-80 h-80 bg-white/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute left-1/3 -bottom-24 w-72 h-72 bg-sky-400/15 rounded-full blur-2xl pointer-events-none" />
+      <section className="bg-gradient-to-r from-blue-700 via-indigo-700 to-sky-600 text-white relative shadow-lg z-30">
+        {/* 背景環境裝飾光暈（獨立 overflow-hidden 容器，防止子層下拉選單被截斷） */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <div className="absolute -right-20 -top-20 w-80 h-80 bg-white/10 rounded-full blur-3xl" />
+          <div className="absolute left-1/3 -bottom-24 w-72 h-72 bg-sky-400/15 rounded-full blur-2xl" />
+        </div>
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-7 relative z-10">
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-5">
@@ -1223,7 +1225,7 @@ function TripDetailInner({ slug }: { slug: string }) {
             </div>
 
             {/* 右側快速操作按鈕組 */}
-            <div className="flex items-center gap-2 shrink-0 flex-wrap">
+            <div className="flex items-center gap-2 shrink-0 flex-wrap relative z-50">
               <button
                 onClick={() => setShowNicknameModal(true)}
                 className="px-4 py-2.5 bg-white/15 hover:bg-white/25 backdrop-blur-md text-white font-bold rounded-2xl text-xs transition-all cursor-pointer border border-white/20"

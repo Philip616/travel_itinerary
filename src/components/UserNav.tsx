@@ -43,7 +43,7 @@ export function UserNav({ onViewMyTrips, className = '', variant = 'dark' }: Use
 
   return (
     <>
-      <div className={`relative inline-block ${className}`} ref={dropdownRef}>
+      <div className={`relative inline-block z-40 ${className}`} ref={dropdownRef}>
         {!user ? (
           <button
             onClick={() => setShowAuthModal(true)}
@@ -96,7 +96,7 @@ export function UserNav({ onViewMyTrips, className = '', variant = 'dark' }: Use
 
         {/* 登入後下拉選單 */}
         {user && dropdownOpen && (
-          <div className="absolute right-0 mt-2 w-64 bg-white rounded-2xl shadow-xl border border-slate-100 p-2 z-50 text-slate-800 animate-in fade-in zoom-in-95 duration-150">
+          <div className="absolute right-0 mt-2 w-64 bg-white rounded-2xl shadow-2xl border border-slate-200/90 p-2 z-[100] text-slate-800 animate-in fade-in zoom-in-95 duration-150">
             {/* 使用者個人資訊簡介 */}
             <div className="p-3 bg-slate-50/80 rounded-xl mb-1.5">
               <div className="flex items-center gap-2.5">

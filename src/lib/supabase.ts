@@ -52,7 +52,12 @@ export async function signInWithGoogle(): Promise<{ error: string | null }> {
         redirectTo: window.location.origin,
       },
     });
-    if (error) return { error: error.message };
+    if (error) {
+      if (error.message?.includes('provider is not enabled')) {
+        return { error: 'Supabase 後台尚未啟用 Google 登入提供者：請前往 Supabase Dashboard -> Authentication -> Providers -> 啟用 Google 並填入 Client ID 與 Client Secret。' };
+      }
+      return { error: error.message };
+    }
     return { error: null };
   } catch (err: any) {
     return { error: err?.message || 'Google 登入連線失敗' };
@@ -70,7 +75,12 @@ export async function signInWithFacebook(): Promise<{ error: string | null }> {
         redirectTo: window.location.origin,
       },
     });
-    if (error) return { error: error.message };
+    if (error) {
+      if (error.message?.includes('provider is not enabled')) {
+        return { error: 'Supabase 後台尚未啟用 Facebook 登入提供者：請前往 Supabase Dashboard -> Authentication -> Providers -> 啟用 Facebook 並填入 App ID 與 App Secret。' };
+      }
+      return { error: error.message };
+    }
     return { error: null };
   } catch (err: any) {
     return { error: err?.message || 'Facebook 登入連線失敗' };
@@ -675,12 +685,28 @@ export async function registerTripMember(
 
       if (queryErr) throw queryErr;
 
-      // 優先依 userId 匹配，其次依 deviceId 或同名匹配
-      const existing = existingList?.find((m: TripMember) => 
-        (userId && m.user_id === userId) || 
-        (!userId && m.device_id && m.device_id === deviceId) || 
-        (!userId && m.nickname.toLowerCase() === cleanName.toLowerCase())
-      );
+      // 智慧匹配原則：
+      // 1. 若資料庫已有綁定此帳號的成員紀錄 (user_id === userId)，直接沿用並更新暱稱
+      // 2. 若無綁定帳號，但存在同一裝置建立且尚未綁定帳號的紀錄 (!m.user_id && m.device_id === deviceId)，自動認領綁定
+      // 3. 若同名且該成員尚未綁定其他帳號 (!m.user_id && m.nickname.toLowerCase() === cleanName.toLowerCase())，自動連鎖認領綁定至此帳號
+      let existing: TripMember | undefined;
+
+      if (userId) {
+        existing = existingList?.find((m: TripMember) => m.user_id === userId);
+        if (!existing && deviceId) {
+          existing = existingList?.find((m: TripMember) => !m.user_id && m.device_id === deviceId);
+        }
+        if (!existing) {
+          existing = existingList?.find((m: TripMember) => !m.user_id && m.nickname.toLowerCase() === cleanName.toLowerCase());
+        }
+      } else {
+        if (deviceId) {
+          existing = existingList?.find((m: TripMember) => m.device_id === deviceId);
+        }
+        if (!existing) {
+          existing = existingList?.find((m: TripMember) => m.nickname.toLowerCase() === cleanName.toLowerCase());
+        }
+      }
 
       if (existing) {
         const updatePayload: any = { nickname: cleanName };
